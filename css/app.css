@@ -277,14 +277,28 @@ kbd { background: var(--bg2); border: 1px solid var(--line); border-bottom-width
 .qm-brushes { display: flex; flex-wrap: wrap; gap: 3px; } .qm-sw { display: flex; flex-wrap: wrap; gap: 4px; }
 .qm-tip { margin-top: 8px; } .qm-tip .row.check { margin-bottom: 4px; color: var(--ink); }
 .qm-zoom { align-items: center; } .qm-zoom .ql { font-size: 11px; color: var(--muted); width: 36px; } .qm-zoom .qv { font-size: 11px; min-width: 38px; text-align: center; }
-.cpop { width: 270px; } .cpop .hex { width: 76px; flex: none; }
+.cpop { width: 290px; } .cpop .hex { width: 76px; flex: none; }
 /* color wheel */
 .cw { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 4px 0 8px; }
 .cw-canvas { touch-action: none; cursor: crosshair; }
-.cw-info { display: flex; align-items: center; gap: 8px; font-size: 12px; } .cw-now { width: 34px; height: 20px; border-radius: 5px; border: 1px solid rgba(0,0,0,.35); } .cw-hex { font-family: ui-monospace, monospace; color: var(--muted); }
+.cw-canvas:focus-visible { outline: 3px solid var(--accent2); outline-offset: 4px; border-radius: 50%; }
+.cw-info { display: flex; align-items: center; gap: 10px; width: 100%; }
+.cw-pair { display: flex; border-radius: 8px; overflow: hidden; border: 2px solid var(--ink); flex: none; }
+.cw-now, .cw-old { width: 40px; height: 34px; display: block; } .cw-old { cursor: pointer; }
+.cw-txt { display: flex; flex-direction: column; line-height: 1.25; } .cw-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.cw-hex { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+.cw-sliders { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.cw-sl { display: grid; grid-template-columns: 70px 1fr 30px; align-items: center; gap: 8px; font-size: 12px; color: var(--ink); }
+.cw-sl input[type=range] { -webkit-appearance: none; appearance: none; height: 14px; border-radius: 7px; border: 1px solid rgba(0,0,0,.4); }
+.cw-sl input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 3px solid #111; box-shadow: 0 1px 4px rgba(0,0,0,.5); cursor: pointer; }
+.cw-sl input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 3px solid #111; }
+.cw-sl input[type=range]:focus-visible { outline: 2px solid var(--accent2); outline-offset: 3px; }
+.cw-val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ed-name { width: 170px; background: var(--bg2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 5px 9px; font: inherit; font-size: 13px; }
+.ed-name:focus { border-color: var(--accent2); outline: none; } .ed-name::placeholder { color: var(--muted); font-style: italic; }
 .cw-ideas { width: 100%; display: flex; flex-direction: column; gap: 4px; }
-.cw-row { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; } .cw-row .sw { width: 20px; height: 20px; }
-.cw-lbl { font-size: 10px; color: var(--muted); width: 82px; flex: none; }
+.cw-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; } .cw-row .sw { width: 24px; height: 24px; }
+.cw-lbl { font-size: 11px; color: var(--muted); width: 100%; margin-top: 2px; }
 /* tip shape picker */
 .shape-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); gap: 4px; margin: 4px 0; }
 .shape-btn { height: 36px; padding: 0; border-radius: 7px; border: 1px solid var(--line); background: #2a2522; display: flex; align-items: center; justify-content: center; }
@@ -300,3 +314,11 @@ kbd { background: var(--bg2); border: 1px solid var(--line); border-bottom-width
   .shelf { padding: 16px; gap: 20px; justify-content: center; } .book-card { width: 150px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* folding groups inside panels */
+details.sub { border-top: 1px solid var(--line); padding: 2px 0; }
+details.sub > summary { cursor: pointer; list-style: none; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 7px 0; display: flex; align-items: center; gap: 6px; }
+details.sub > summary::-webkit-details-marker { display: none; }
+details.sub > summary::before { content: '▸'; font-size: 10px; transition: transform .15s; }
+details.sub[open] > summary::before { transform: rotate(90deg); }
+details.sub > summary:hover, details.sub > summary:focus-visible { color: var(--ink); }

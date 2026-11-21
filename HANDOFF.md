@@ -62,8 +62,11 @@ No build step. Vanilla JS ES modules. `three` is mapped with an import map in `i
   gilded edges, endpapers, band, ribbon, 6 desks, light direction and warmth.
   Camera pad with 12 views, free camera (C, then WASD/QE), flick (F), keys list (K).
 - **Customize:** four tabs, each with "Show me". Draw your own cover in the full editor.
+- **Saving and names:** saves a few seconds after you stop drawing, fully every 5 minutes, and when you switch tabs or close. A restore point every 5 minutes, 24 kept (about 2 hours), in Page > Restore points. Status shows "Saved X min ago".
+  Name a page in the box at the top of the editor (or Page > Name). Names show on the book's Draw buttons and in export file names.
+- **Copy style:** help lines are one short sentence. Brush descriptions say what it is and what it is best for. Brush groups and setting groups fold.
 - **Editor:** 75 brushes in every section. Tip shapes for brushes, blenders and erasers. Drag setting (how far colors smear) in brush settings and the dock.
-  Double-click the page = quick menu (right button does nothing). Color wheel in the panel and as a popup (C or click the color chip).
+  Double-click the page = quick menu (right button does nothing). Color wheel in the panel (right under Brushes) and as a popup (C or click the color chip). Big handles, new vs old color, color name, Color / Strength / Lightness sliders, arrow keys work, screen reader labels.
   Pick color with a loupe (I, or hold Alt), from everything or one layer, 1 to 11 px average, plus pick from screen and copy hex.
   Zoom: scroll, 1/2/3 = 100/200/400% at cursor, 0 fit, hold Z + click or drag, zoom row in the quick menu. Paints mix like real paint (blue + yellow = green). Blend tool with 6 blenders
   plus smoothing. Brush maker with "My brushes" and .brush.json sharing. Layers with thumbnails, drag order,

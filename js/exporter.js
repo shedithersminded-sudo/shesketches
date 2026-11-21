@@ -190,11 +190,11 @@ async function renderArt(book, idxs, o) {
       const b = R ? await renderPage(R, book, { scale: s, background: o.bg, bgColor: o.bgColor, pageNumber: o.pnum ? idxs[k + 1] + 1 : 0 }) : null;
       const c = document.createElement('canvas'); c.width = a.width + (b ? b.width : 0); c.height = a.height;
       const g = c.getContext('2d'); g.drawImage(a, 0, 0); if (b) g.drawImage(b, a.width, 0);
-      out.push({ c, name: `page-${idxs[k] + 1}${R ? '-' + (idxs[k + 1] + 1) : ''}` });
+      out.push({ c, name: `page-${idxs[k] + 1}${R ? '-' + (idxs[k + 1] + 1) : ''}${L.title ? '-' + safeName(L.title) : ''}` });
     }
     return out;
   }
-  return Promise.all(pages.map(async (p, k) => ({ c: await renderPage(p, book, { scale: sizeFor(p, book, o), background: o.bg, bgColor: o.bgColor, pageNumber: o.pnum ? idxs[k] + 1 : 0 }), name: `page-${idxs[k] + 1}` })));
+  return Promise.all(pages.map(async (p, k) => ({ c: await renderPage(p, book, { scale: sizeFor(p, book, o), background: o.bg, bgColor: o.bgColor, pageNumber: o.pnum ? idxs[k] + 1 : 0 }), name: `page-${idxs[k] + 1}${p.title ? '-' + safeName(p.title) : ''}` })));
 }
 function artJob(book, idxs, o) {
   return {
@@ -528,7 +528,7 @@ export function openExport(app, book, { tab = 'artwork', pageIndex = 0 } = {}) {
         !p.lossless ? slider('JPG quality', p.q, 0.6, 1, 0.01, v => p.q = v, v => Math.round(v * 100)) : null,
         slider('Bleed', p.bleed, 0, 6, 0.5, v => p.bleed = v, v => v + ' mm'), check('Crop marks', p.marks, v => p.marks = v),
         select('Layout', p.layout, { single: 'Single pages', spread: 'Spreads' }, v => p.layout = v), check('Page numbers', p.pnum, v => p.pnum = v),
-        el('p', { class: 'muted small' }, 'Colors are sRGB. For CMYK, send this PDF to your print shop or convert it in a print app. The browser cannot do CMYK conversion.'),
+        el('p', { class: 'muted small' }, 'Colors are RGB. Your print shop can convert to CMYK.'),
         go('Export PDF', () => { addJob(pdfJob(book, idxs(), { ...p })); toast('Added to the export queue.'); }));
     }
     if (cur === 'video' || (cur === 'gif' && state.gif.mode === 'flip')) {
@@ -577,7 +577,7 @@ export function openExport(app, book, { tab = 'artwork', pageIndex = 0 } = {}) {
         go('Export stickers', () => { if (!chosen.size) return toast('Pick at least one sticker.'); addJob(stickerJob([...chosen], { ...s })); }));
     }
     if (cur === 'project') {
-      body.append(el('p', {}, 'Saves the whole sketchbook with every layer still editable, as one .shesketch file. Keep it as a backup, move it to another PC, or open it again later with "Open a project file" on the shelf.'),
+      body.append(el('p', {}, 'The whole book in one file, every layer still editable. Use it as a backup or to move to another PC.'),
         go('Save project file', () => addJob(projectJob(book))));
     }
     if (cur === 'history') {

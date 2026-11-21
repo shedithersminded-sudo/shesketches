@@ -112,13 +112,13 @@ const app = {
         select('Size', o.size, { ...Object.fromEntries(Object.entries(SIZES).map(([k, v]) => [k, `${v.name} (${v.w}×${v.h} mm)`])), custom: 'Custom size' }, v => { o.size = v; if (v === 'custom') { o.wMM ||= 148; o.hMM ||= 210; } custom.style.display = v === 'custom' ? '' : 'none'; upd(); }), custom,
         numberInput('Pages', o.pages, v => { o.pages = Math.max(2, Math.min(800, Math.round(v))); upd(); }, { min: 2, max: 800, step: 2 }),
         slider('Paper thickness', o.paperWeight, 60, 400, 10, v => { o.paperWeight = v; upd(); }, v => v + ' gsm'),
-        el('p', { class: 'muted small' }, 'Thin paper (60 to 100 gsm) makes many light pages, like a flip book or journal. Thick paper (200 to 400 gsm) is for paint and watercolor and makes a fat book.'),
+        el('p', { class: 'muted small' }, 'Thin paper (60 to 100 gsm) is for journals. Thick paper (200 to 400 gsm) is for paint.'),
         select('Resolution', String(o.dpi), { 150: '150 DPI (light, fast)', 200: '200 DPI', 300: '300 DPI (print quality)', 400: '400 DPI (big prints)' }, v => { o.dpi = +v; upd(); }),
         select('Binding', o.binding, BINDINGS, v => o.binding = v),
         select('Paper', o.paper, Object.fromEntries(Object.entries(PAPERS).map(([k, v]) => [k, v.name])), v => o.paper = v),
         select('Cover', o.material, Object.fromEntries(Object.entries(COVERS).map(([k, v]) => [k, v.name])), v => o.material = v),
         colorInput('Cover color', o.coverColor, v => o.coverColor = v), est,
-        el('p', { class: 'muted small' }, 'You can change the cover, paper, binding, thickness and everything else later with Customize. Page size and resolution are set now.'));
+        el('p', { class: 'muted small' }, 'You can change everything later in Customize, except page size and resolution.'));
       upd();
     };
     for (const [k, t] of Object.entries(BOOK_TYPES)) {
@@ -166,7 +166,7 @@ const app = {
     this.viewPad = this.makeViewPad();
     this.freeHint = el('div', { class: 'free-hint' }, 'Free camera: drag to look, W A S D to move, Q and E for down and up, Shift for faster. Esc to leave.');
     stage.append(this.viewPad, this.freeHint);
-    root.append(bar, stage, el('div', { class: 'book-hint muted small' }, 'Click a page edge or drag a corner to turn. Double-click a page to draw on it. Right-drag to look around, scroll to zoom. Press K for all keys.'));
+    root.append(bar, stage, el('div', { class: 'book-hint muted small' }, 'Click a page edge to turn. Double-click a page to draw. Scroll to zoom. K for all keys.'));
     this.book3d = new Book3D(stage, { quality: this.settings.quality, reducedMotion: this.settings.reducedMotion });
     this.stage = stage; this.trayOpen = false;
     // drop a sticker straight onto the book
@@ -273,7 +273,7 @@ const app = {
     const tab = (label, ks) => el('button', { class: 'btn small', onclick: e => { tray.querySelectorAll('.st-tabs .btn').forEach(b => b.classList.remove('lit')); e.target.classList.add('lit'); fill(ks); } }, label);
     const tray = el('div', { class: 'sticker-tray' },
       el('div', { class: 'st-head' }, el('b', {}, 'Stickers and pieces'), el('button', { class: 'icon-btn tiny', title: 'Close (T)', onclick: () => { tray.remove(); this.trayOpen = false; } }, '✕')),
-      el('p', { class: 'muted small', style: { margin: '6px 10px 0' } }, 'Drag one onto the cover or any page. Then press "Edit it" or double-click the page to move it, resize it or change its look.'),
+      el('p', { class: 'muted small', style: { margin: '6px 10px 0' } }, 'Drag one onto the cover or a page. Press "Edit it" to move, resize or style it.'),
       el('div', { class: 'st-tabs' }, tab('Stickers', ['sticker', 'made']), tab('My art', ['art']), tab('GIFs', ['media']), tab('All', ['sticker', 'made', 'art', 'media']),
         el('button', { class: 'btn small', onclick: () => openFactory(null, () => fill(['sticker', 'made'])) }, '+ New')),
       grid);
@@ -317,8 +317,9 @@ const app = {
     lbl.textContent = this.book3d.pos === 0 ? 'Cover' : `${l != null ? 'Page ' + (l + 1) : 'Inside cover'} / ${r != null ? 'Page ' + (r + 1) : 'Back cover'} of ${N}`;
     this.editBtns.innerHTML = '';
     if (this.book3d.pos === 0) this.editBtns.append(el('button', { class: 'btn small primary', onclick: () => this.editCover() }, 'Draw on the cover'));
-    if (l != null) this.editBtns.append(el('button', { class: 'btn small', onclick: () => this.openEditor(l) }, `Draw on page ${l + 1}`));
-    if (r != null) this.editBtns.append(el('button', { class: 'btn small primary', onclick: () => this.openEditor(r) }, `Draw on page ${r + 1}`));
+    const btn = (i, primary) => { const b = el('button', { class: 'btn small' + (primary ? ' primary' : ''), title: 'Open this page to draw on it', onclick: () => this.openEditor(i) }, `Draw on page ${i + 1}`); db.get('pages', this.book.pages[i]).then(p => { if (p && p.title) b.textContent = `Draw on "${p.title.length > 22 ? p.title.slice(0, 21) + '…' : p.title}"`; }); return b; };
+    if (l != null) this.editBtns.append(btn(l, false));
+    if (r != null) this.editBtns.append(btn(r, true));
   },
   async openEditor(i, pageId) {
     if (this.editor) return;
@@ -418,7 +419,7 @@ const app = {
         check('Ribbon bookmark', !!c.ribbon, v => { c.ribbon = v; apply(); }), colorInput('Ribbon color', c.ribbonColor || '#8a1010', v => { c.ribbonColor = v; apply(); })],
       inside: () => [
         showBtn('Show me the pages', show(Math.max(1, this.book3d.pos), 'angled')),
-        help('The paper inside. This changes every page that uses the book paper. A single page can have its own paper in the editor.'),
+        help('The paper on every page. One page can have its own paper in the editor.'),
         select('Paper type', b.paper.type, papers(), async v => { if (v === 'custom') { const f = await pickFiles('image/*', false); if (!f[0]) return; b.paper.custom = await putBlob(f[0]); } b.paper.type = v; b.paper.color = null; apply(true); }),
         colorInput('Paper tint', b.paper.color || (PAPERS[b.paper.type] || PAPERS.sketch).color, v => { b.paper.color = v; apply(true); }),
         el('div', { class: 'row wrap' }, el('button', { class: 'btn small primary', onclick: () => openPaperMaker(id => { if (id) { b.paper.type = id; b.paper.color = null; apply(true); m.close(); this.customize(); } }) }, '+ Make my own paper'),
@@ -489,7 +490,7 @@ const app = {
     };
     rec.start(250); this.rec = rec;
     this.recBtn.textContent = '■ Stop recording'; this.recBtn.classList.add('rec');
-    toast('Recording the book view. Flip, flick or fly around, then press Stop. For a perfectly smooth video use Export > Flip-through video.');
+    toast('Recording. Flip or fly around, then press Stop. Export > Flip-through video is smoother.');
   },
 
   // ---------- library & settings ----------
@@ -513,7 +514,7 @@ const app = {
       el('p', { class: 'muted small' }, 'This only changes the live preview. Exports always use the full quality you pick in Export.'),
       check('Reduce motion (instant page turns)', s.reducedMotion, v => { s.reducedMotion = v; setSetting('reducedMotion', v); if (this.book3d) this.book3d.reducedMotion = v; }),
       el('h3', {}, 'Saving'),
-      el('p', {}, 'Everything saves by itself in this browser on this PC. Nothing is uploaded. Clearing your browser data for this site deletes it, so save project files as backups.'),
+      el('p', {}, 'Everything saves in this browser on this PC. Nothing is uploaded. Clearing site data deletes it, so keep project files as backups.'),
       el('p', { class: 'muted small' }, `Export folder: ${dir ? dir.name : 'Downloads'}`),
       el('div', { class: 'row wrap' },
         el('button', { class: 'btn small', onclick: chooseExportFolder }, 'Choose export folder'),
@@ -527,14 +528,14 @@ const app = {
   guide(first) {
     const step = (n, t, ...p) => el('div', { class: 'g-step' }, el('span', { class: 'g-n' }, n), el('div', {}, el('h3', {}, t), ...p.map(x => el('p', {}, x))));
     const body = el('div', { class: 'guide' },
-      el('p', { class: 'lead' }, 'SHESKETCHES is a sketchbook you can hold, flip and draw in, plus a full art studio around it. Everything you make stays in your own browser on your own PC. Nobody else can see it, and you can use it offline.'),
-      step('1', 'Make a sketchbook', 'Press "+ New sketchbook" and pick a kind of book: classic, chunky journal, pocket, watercolor, spiral, flip book, black paper and more. Then set the size, pages, paper and thickness. "Customize" changes the cover, title, corners, page edges, inside covers, desk and light any time. "Paper maker" lets you make your own paper.'),
-      step('2', 'Flip through it', 'Click the edge of a page, drag a corner, or use the arrow keys. "Flick" thumbs through it like a flip book. The camera pad at the bottom right aims the camera, and "Free camera" lets you fly around. Press K for every key.'),
-      step('3', 'Draw on a page or the cover', 'Double-click a page or press "Draw on page". Tools are along the bottom, brushes and settings on the right. Paints really mix (blue and yellow make green), blenders smudge and soften, the water brush melts watercolor pencil. Every setting explains itself, and you can make and save your own brushes.'),
-      step('4', 'Layers, undo and history', 'Every page has layers you can lock, hide, reorder, clip and merge. Undo and Redo are at the bottom and History lets you jump back to any step. Select & move picks one thing or many so you can move or delete exactly what you want.'),
-      step('5', 'Add your art and media', '"+ Add media" puts your pictures, GIFs and short videos on a page. Moving ones play in the book and in exported videos. The Sticker factory cuts things out, Makers build torn paper, lace, lockets, tape and more, and Dither sends any picture through the SHEDITHERS effects.'),
-      step('6', 'Export', '"Export" gives you clean artwork (PNG, TIFF, JPG, WEBP, BMP, print PDF), flip-through videos up to 4K with page sounds (including a fast flip book style), and GIFs. Every export is checked and you get a report. "Record" captures the view while you flip by hand.'),
-      step('7', 'Keep it safe', 'Your work saves by itself. To back up a book or move it to another PC, use Export > Project file, and open it later with "Open a project file".'));
+      el('p', { class: 'lead' }, 'A sketchbook you can flip and draw in, with a full art studio. Your work stays in your own browser. Nobody else can see it.'),
+      step('1', 'Make a sketchbook', 'Press "+ New sketchbook" and pick a kind. "Customize" changes the cover, paper and desk any time.'),
+      step('2', 'Flip through it', 'Click a page edge, drag a corner, or use the arrow keys. Press K for every key.'),
+      step('3', 'Draw', 'Double-click a page. Tools are at the bottom, brushes on the right. Paints mix like real paint.'),
+      step('4', 'Name and save', 'Name your art at the top of the page. It saves by itself, with a restore point every 5 minutes.'),
+      step('5', 'Add your art', '"+ Add media" adds pictures, GIFs and videos. Stickers and Makers add cut-outs.'),
+      step('6', 'Export', '"Export" makes images, print PDFs, videos and GIFs. Each file is checked for you.'),
+      step('7', 'Back it up', 'Export > Project file saves a whole book. Open it on any PC with "Open a project file".'));
     modal(first ? 'Welcome to SHESKETCHES' : 'How it works', body, { wide: true, buttons: [{ label: first ? 'Start' : 'Close', primary: true, onClick: c => c() }], onClose: () => setSetting('seenGuide', true) });
   },
 };

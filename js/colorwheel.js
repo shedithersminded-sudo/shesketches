@@ -18,6 +18,17 @@ export function hsvToHex(h, s, v) {
   return rgbToHex((r + m) * 255, (g + m) * 255, (b + m) * 255);
 }
 
+// a plain name for a color, read out to screen readers and shown under the wheel
+export function colorName(h, s, v) {
+  if (v < 0.12) return 'Black';
+  if (s < 0.1) return v > 0.92 ? 'White' : v > 0.6 ? 'Light gray' : v > 0.3 ? 'Gray' : 'Dark gray';
+  const names = [[15, 'Red'], [40, 'Orange'], [65, 'Yellow'], [160, 'Green'], [195, 'Teal'], [255, 'Blue'], [285, 'Purple'], [330, 'Pink'], [361, 'Red']];
+  let n = names.find(([d]) => h < d)[1];
+  if (n === 'Orange' && v < 0.6) n = 'Brown';
+  const tone = v < 0.4 ? 'Dark ' : v > 0.85 && s < 0.45 ? 'Light ' : s < 0.35 ? 'Soft ' : '';
+  return tone + n.toLowerCase().replace(/^./, c => tone ? c : c.toUpperCase());
+}
+
 /**
  * A color wheel.
  * onInput(hex) fires while dragging, onChange(hex) when you let go or click a swatch.
@@ -25,10 +36,12 @@ export function hsvToHex(h, s, v) {
  */
 export function colorWheel({ value = '#2a2a2c', size = 210, onInput, onChange, ideas = true }) {
   let [h, s, v] = hexToHsv(value);
-  const dpr = devicePixelRatio || 1, ring = Math.max(14, size * 0.1), R = size / 2, inner = R - ring - 4, half = inner * Math.SQRT1_2;
-  const cv = el('canvas', { class: 'cw-canvas', width: size * dpr, height: size * dpr, style: { width: size + 'px', height: size + 'px' }, 'aria-label': 'Color wheel. Drag the ring for the color, the square for how strong and how light it is.' });
+  const start = value;
+  const dpr = devicePixelRatio || 1, ring = Math.max(18, size * 0.12), R = size / 2, inner = R - ring - 4, half = inner * Math.SQRT1_2;
+  const cv = el('canvas', { class: 'cw-canvas', tabindex: 0, role: 'slider', width: Math.round(size * dpr), height: Math.round(size * dpr), style: { width: size + 'px', height: size + 'px' }, 'aria-label': 'Color wheel. Left and right arrows change the color. Up and down change lightness. Page Up and Page Down change strength.' });
   const g = cv.getContext('2d');
-  const now = el('span', { class: 'cw-now' }), hexL = el('span', { class: 'cw-hex' });
+  const now = el('span', { class: 'cw-now', title: 'New color' }), old = el('span', { class: 'cw-old', title: 'Color before you opened this. Click to go back to it.', style: { background: start }, onclick: () => { [h, s, v] = hexToHsv(start); draw(); syncSliders(); fillIdeas(); onChange?.(start); } }), hexL = el('span', { class: 'cw-hex' });
+  const name = el('span', { class: 'cw-name' });
   const ideasBox = el('div', { class: 'cw-ideas' });
   const cur = () => hsvToHex(h, s, v);
   const draw = () => {
@@ -44,12 +57,30 @@ export function colorWheel({ value = '#2a2a2c', size = 210, onInput, onChange, i
     const gb = g.createLinearGradient(0, y0, 0, y0 + w); gb.addColorStop(0, 'rgba(0,0,0,0)'); gb.addColorStop(1, '#000'); g.fillStyle = gb; g.fillRect(x0, y0, w, w);
     // markers
     const a = (h - 90) * Math.PI / 180, mr = R - ring / 2;
-    const mark = (x, y, r) => { g.lineWidth = 2.5; g.strokeStyle = '#000'; g.beginPath(); g.arc(x, y, r, 0, 7); g.stroke(); g.lineWidth = 1.5; g.strokeStyle = '#fff'; g.stroke(); };
-    mark(R + Math.cos(a) * mr, R + Math.sin(a) * mr, ring / 2 - 1);
-    mark(x0 + s * w, y0 + (1 - v) * w, 6);
-    const c = cur(); now.style.background = c; hexL.textContent = c;
+    const mark = (x, y, r, fill) => { g.fillStyle = fill; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.lineWidth = 4; g.strokeStyle = '#000'; g.stroke(); g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke(); };
+    mark(R + Math.cos(a) * mr, R + Math.sin(a) * mr, ring / 2 + 1, hsvToHex(h, 1, 1));
+    mark(x0 + s * w, y0 + (1 - v) * w, 9, cur());
+    const c = cur(); now.style.background = c; hexL.textContent = c.toUpperCase(); name.textContent = colorName(h, s, v);
+    cv.setAttribute('aria-valuetext', `${colorName(h, s, v)}, ${c}`);
   };
-  const swatch = (c, title) => el('button', { class: 'sw', style: { background: c }, title: title + ' ' + c, onclick: () => { [h, s, v] = hexToHsv(c); draw(); fillIdeas(); onChange?.(c); } });
+  const swatch = (c, title) => el('button', { class: 'sw', style: { background: c }, title: title + ' ' + c, 'aria-label': title + ' ' + c, onclick: () => { [h, s, v] = hexToHsv(c); draw(); syncSliders(); fillIdeas(); onChange?.(c); } });
+  // three plain sliders under the wheel: easier to see, and they work with the keyboard and screen readers
+  const sl = (label, max, get, set, bg) => {
+    const r = el('input', { type: 'range', min: 0, max, step: 1, value: get(), 'aria-label': label });
+    const val = el('span', { class: 'cw-val' });
+    r.addEventListener('input', () => { set(+r.value); draw(); val.textContent = r.value; paint(); onInput?.(cur()); });
+    r.addEventListener('change', () => { fillIdeas(); onChange?.(cur()); });
+    const row = el('label', { class: 'cw-sl' }, el('span', { class: 'cw-sl-l' }, label), r, val);
+    const paint = () => { r.style.background = bg(); val.textContent = Math.round(get()); };
+    row.sync = () => { r.value = Math.round(get()); paint(); };
+    return row;
+  };
+  const sliders = [
+    sl('Color', 359, () => h, x => h = x, () => 'linear-gradient(90deg,' + [0, 60, 120, 180, 240, 300, 360].map(d => `hsl(${d},100%,50%)`).join(',') + ')'),
+    sl('Strength', 100, () => s * 100, x => s = x / 100, () => `linear-gradient(90deg, ${hsvToHex(h, 0, v)}, ${hsvToHex(h, 1, v)})`),
+    sl('Lightness', 100, () => v * 100, x => v = x / 100, () => `linear-gradient(90deg, #000, ${hsvToHex(h, s, 1)})`),
+  ];
+  const syncSliders = () => sliders.forEach(r => r.sync());
   const fillIdeas = () => {
     if (!ideas) return;
     ideasBox.innerHTML = '';
@@ -64,7 +95,7 @@ export function colorWheel({ value = '#2a2a2c', size = 210, onInput, onChange, i
     const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
     if (drag === 'ring') h = (Math.atan2(y - R, x - R) * 180 / Math.PI + 90 + 360) % 360;
     else { s = clamp((x - (R - half)) / (half * 2), 0, 1); v = clamp(1 - (y - (R - half)) / (half * 2), 0, 1); }
-    draw(); onInput?.(cur());
+    draw(); syncSliders(); onInput?.(cur());
   };
   cv.addEventListener('pointerdown', e => {
     const r = cv.getBoundingClientRect(), x = e.clientX - r.left - R, y = e.clientY - r.top - R, d = Math.hypot(x, y);
@@ -75,9 +106,19 @@ export function colorWheel({ value = '#2a2a2c', size = 210, onInput, onChange, i
   });
   cv.addEventListener('pointermove', e => { if (drag) pick(e); });
   const end = () => { if (!drag) return; drag = null; fillIdeas(); onChange?.(cur()); };
+  let keyT;
+  cv.addEventListener('keydown', e => {
+    const big = e.shiftKey ? 3 : 1;
+    if (e.key === 'ArrowLeft') h = (h - 5 * big + 360) % 360; else if (e.key === 'ArrowRight') h = (h + 5 * big) % 360;
+    else if (e.key === 'ArrowUp') v = clamp(v + 0.03 * big, 0, 1); else if (e.key === 'ArrowDown') v = clamp(v - 0.03 * big, 0, 1);
+    else if (e.key === 'PageUp') s = clamp(s + 0.05 * big, 0, 1); else if (e.key === 'PageDown') s = clamp(s - 0.05 * big, 0, 1);
+    else return;
+    e.preventDefault(); e.stopPropagation(); draw(); syncSliders(); onInput?.(cur());
+    clearTimeout(keyT); keyT = setTimeout(() => { fillIdeas(); onChange?.(cur()); }, 400);
+  });
   cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
-  const box = el('div', { class: 'cw' }, cv, el('div', { class: 'cw-info' }, now, hexL), ideasBox);
-  box.set = hex => { if (!/^#[0-9a-f]{6}$/i.test(hex)) return; const nh = hexToHsv(hex); if (nh[1] === 0 || nh[2] === 0) nh[0] = h; [h, s, v] = nh; draw(); fillIdeas(); };
-  draw(); fillIdeas();
+  const box = el('div', { class: 'cw' }, cv, el('div', { class: 'cw-info' }, el('span', { class: 'cw-pair' }, now, old), el('span', { class: 'cw-txt' }, name, hexL)), el('div', { class: 'cw-sliders' }, sliders), ideasBox);
+  box.set = hex => { if (!/^#[0-9a-f]{6}$/i.test(hex)) return; const nh = hexToHsv(hex); if (nh[1] === 0 || nh[2] === 0) nh[0] = h; [h, s, v] = nh; draw(); syncSliders(); fillIdeas(); };
+  draw(); syncSliders(); fillIdeas();
   return box;
 }

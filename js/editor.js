@@ -14,16 +14,17 @@ const BLENDS = { 'source-over': 'Normal', multiply: 'Multiply', screen: 'Screen'
 const PALETTE = ['#101012', '#3a3a3c', '#8a8a8a', '#f4f1ea', '#ffffff', '#7a0f12', '#b3211e', '#e0533d', '#ef8fa0', '#f2c94c', '#e8b23a', '#c9a46a', '#8a6a46', '#4c3a2a', '#5b6a3c', '#2f5d3a', '#2e8a7a', '#3b6ea8', '#1f2f55', '#7fa6c9', '#6b4a8a', '#c86aa0', '#d9d2c3', '#1b1a19'];
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 const clone = o => JSON.parse(JSON.stringify(o));
+const AUTOSAVE_MS = 5 * 60 * 1000; // a full save and a restore point every 5 minutes
 const seededRnd = s => () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
 const TOOLS_UI = [
-  ['brush', 'Draw', 'B', '✎', 'Draw and paint with the brush you pick on the right.'],
-  ['blend', 'Blend', 'S', '☝', 'Smudge and blend colors with a finger, blender, stump or water brush.'],
-  ['eraser', 'Erase', 'E', '⌫', 'Erase on the selected drawing layer.'],
-  ['fill', 'Fill', 'G', '◍', 'Fill an area of one color with your color.'],
-  ['pick', 'Pick color', 'I', '⌖', 'Click or drag on the page to take a color. The ring shows the new color on top and your old one below. Hold Alt with any brush to do it quickly.'],
-  ['move', 'Select & move', 'V', '✥', 'Click a picture or text to select it. Shift-click to pick several. Drag an empty spot to box-select. Drag to move.'],
+  ['brush', 'Draw', 'B', '✎', 'Draw and paint. Pick a brush on the right.'],
+  ['blend', 'Blend', 'S', '☝', 'Smudge and blend colors together.'],
+  ['eraser', 'Erase', 'E', '⌫', 'Erase on the selected layer.'],
+  ['fill', 'Fill', 'G', '◍', 'Fill an area with your color.'],
+  ['pick', 'Pick color', 'I', '⌖', 'Click the page to copy a color. Or hold Alt with any brush.'],
+  ['move', 'Select & move', 'V', '✥', 'Click to select, drag to move. Shift-click picks several.'],
   ['text', 'Text', 'T', 'T', 'Click on the page to write.'],
-  ['hand', 'Pan', 'H', '✋', 'Drag to move around the page. You can also hold Space.'],
+  ['hand', 'Pan', 'H', '✋', 'Drag to move around the page. Or hold Space.'],
 ];
 const KEYS = [
   ['B', 'Draw'], ['S', 'Blend'], ['E', 'Erase'], ['G', 'Fill'], ['I', 'Pick a color from the page (or hold Alt with any brush)'], ['C', 'Color wheel at the cursor'], ['V', 'Select and move'], ['T', 'Text'], ['H or hold Space', 'Pan'],
@@ -65,6 +66,11 @@ export class Editor {
     await this.loadPage();
     this.bindKeys();
     this.fit();
+    // safety net: save every 5 minutes, and whenever you switch tabs or close the window
+    this.autoT = setInterval(() => { if (this.root && this.editedSinceSnap) { this.editedSinceSnap = false; this.save(true); } }, AUTOSAVE_MS);
+    this.statusT = setInterval(() => this.updStatus(), 30000);
+    this.onHide = () => { if (document.visibilityState === 'hidden' && this.isChanged) this.save(); };
+    document.addEventListener('visibilitychange', this.onHide); window.addEventListener('pagehide', this.onHide);
     if (!(await getSetting('seenEditorTips', false))) { setSetting('seenEditorTips', true); setTimeout(() => this.showTips(), 300); }
   }
 
@@ -89,6 +95,7 @@ export class Editor {
     this.activeId = (P.layers.slice().reverse().find(l => l.kind === 'paint') || P.layers[P.layers.length - 1] || {}).id;
     this.selection = new Set(); this.primary = null;
     this.title.textContent = this.coverMode ? 'Cover art' : `Page ${this.idx + 1} of ${this.book.pages.length}`;
+    this.nameI.value = this.page.title || ''; this.nameI.style.display = this.coverMode ? 'none' : '';
     this.renderPanels(); this.updUndo();
     this.dirty = true;
   }
@@ -105,6 +112,9 @@ export class Editor {
   // ---------- DOM ----------
   buildDOM() {
     this.title = el('span', { class: 'ed-title' });
+    this.nameI = el('input', { type: 'text', class: 'ed-name', maxlength: 60, placeholder: 'Name this art', 'aria-label': 'Name of this page', title: 'Give this page a name. It shows in the book and is used as the file name when you export.' });
+    this.nameI.addEventListener('change', () => this.setName(this.nameI.value));
+    this.nameI.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 'Escape') this.nameI.blur(); });
     this.status = el('span', { class: 'ed-status muted' }, 'Saved');
     this.zoomLbl = el('span', { class: 'zoom-lbl' }, '100%');
     this.canvas = el('canvas', { class: 'ed-canvas', 'aria-label': 'Page canvas' });
@@ -148,7 +158,7 @@ export class Editor {
     this.root = el('div', { class: 'editor' },
       el('header', { class: 'ed-top' },
         el('button', { class: 'btn', onclick: () => this.close(), title: 'Save and go back to the book' }, '← Book'),
-        el('button', { class: 'icon-btn', title: 'Previous page (Page Up)', onclick: () => this.gotoPage(this.idx - 1) }, '‹'), this.title,
+        el('button', { class: 'icon-btn', title: 'Previous page (Page Up)', onclick: () => this.gotoPage(this.idx - 1) }, '‹'), this.title, this.nameI,
         el('button', { class: 'icon-btn', title: 'Next page (Page Down)', onclick: () => this.gotoPage(this.idx + 1) }, '›'),
         el('span', { class: 'sep' }),
         el('button', { class: 'icon-btn', title: 'Zoom out (-)', onclick: () => this.zoomBy(1 / 1.25) }, '−'), this.zoomLbl,
@@ -805,9 +815,10 @@ export class Editor {
     if (['brush', 'eraser', 'blend', 'fill'].includes(this.tool)) {
       const p = this.preset;
       this.panel.append(sec('brushes', this.tool === 'blend' ? 'Blenders' : this.tool === 'eraser' ? 'Erasers' : 'Brushes', this.brushGrid(), el('p', { class: 'brush-desc' }, el('b', {}, p.name + ': '), p.desc || 'Your own brush.')),
+        ...(this.tool !== 'eraser' ? [sec('color', 'Color', this.colorControls())] : []),
         sec('bset', 'Brush settings', ...this.brushControls()));
-    }
-    if (this.tool !== 'eraser') this.panel.append(sec('color', 'Color', this.colorControls()), sec('mix', 'Mix paint', this.mixControls()));
+    } else if (this.tool !== 'eraser') this.panel.append(sec('color', 'Color', this.colorControls()));
+    if (this.tool !== 'eraser') this.panel.append(sec('mix', 'Mix two colors', this.mixControls()));
     this.panel.append(this.layerSection());
     this.panel.append(sec('history', `History (${this.undo.length} steps)`, this.historyList()));
     this.panel.append(sec('page', 'Page', ...this.pageControls()));
@@ -825,14 +836,22 @@ export class Editor {
   }
   brushGrid() {
     const wrap = el('div', {});
+    // groups fold so 75 brushes stay easy to browse; the group with your brush is open
+    this.grpOpen ||= {};
     for (const [name, list] of this.brushGroups()) {
-      if (name) wrap.append(el('div', { class: 'grp-title' }, name));
       const g = el('div', { class: 'brush-grid' });
+      let holder = wrap;
+      if (name) {
+        const has = list.some(p => p.id === this.curId);
+        const d = el('details', { class: 'sub bgrp', open: this.grpOpen[name] ?? has }, el('summary', {}, name, el('span', { class: 'muted small' }, ' ' + list.length)));
+        d.addEventListener('toggle', () => { this.grpOpen[name] = d.open; });
+        wrap.append(d); holder = d;
+      }
       for (const p of list) {
         const c = this.previewCanvas(p);
         g.append(el('button', { class: 'brush' + (p.id === this.curId ? ' on' : ''), title: p.desc || p.name, onclick: () => { this.curId = p.id; if (p.color && this.tool === 'brush' && !this.userColor) this.color = p.color; this.renderPanels(); } }, c, el('span', {}, p.name)));
       }
-      wrap.append(g);
+      holder.append(g);
     }
     wrap.append(el('div', { class: 'row wrap' },
       el('button', { class: 'btn small primary', onclick: () => this.brushMaker(null) }, '+ Make a brush'),
@@ -883,11 +902,19 @@ export class Editor {
   brushControls() {
     const p = this.preset;
     const out = [check('Explain each setting', this.explain, v => { this.explain = v; setSetting('explainSettings', v); this.renderPanels(); })];
-    let g0 = '';
+    // each group folds; Basics and Tip start open so the list stays short
+    this.subOpen ||= { Basics: true, Tip: true };
+    let box = null;
     for (const def of paramsFor(p.engine)) {
-      if (def.g !== g0) { out.push(el('div', { class: 'grp-title' }, def.g)); g0 = def.g; }
-      if (def.k === 'tip') { out.push(this.shapePicker(p)); continue; }
-      out.push(this.paramControl(p, def, p[def.k], (k, v) => this.setBrushProp(k, v, true)));
+      if (!box || box.dataset.g !== def.g) {
+        const g = def.g;
+        const d = el('details', { class: 'sub', 'data-g': g, open: !!this.subOpen[g] }, el('summary', {}, g));
+        d.addEventListener('toggle', () => { this.subOpen[g] = d.open; });
+        out.push(d); box = d;
+      }
+      const b = box;
+      if (def.k === 'tip') { b.append(this.shapePicker(p)); continue; }
+      b.append(this.paramControl(p, def, p[def.k], (k, v) => this.setBrushProp(k, v, true)));
     }
     if (this.tool === 'fill') out.push(slider('Fill tolerance', this.fillTol ?? 32, 0, 160, 1, v => this.fillTol = v));
     out.push(check('Show the tool on the page', this.showTool !== false, v => { this.showTool = v; this.dirty = true; }));
@@ -911,7 +938,7 @@ export class Editor {
       else { shapePath(g, k, 11); g.fill(); }
       return c;
     };
-    const help = p.kind === 'blend' ? 'The shape of the blender. A square or flat tip blends clean straight edges, round is soft, sponge and rake leave texture.' : 'The shape of the tip. Use Roundness and Tip angle below to squash and turn it.';
+    const help = p.kind === 'blend' ? 'Square and flat blend clean edges. Round is soft. Sponge and rake add texture.' : 'Pick a shape. Roundness and Tip angle squash and turn it.';
     const box = el('div', { class: 'param' }, el('div', { class: 'lbl' }, 'Tip shape: ' + TIP_SHAPES[cur]),
       el('div', { class: 'shape-grid' }, ids.map(k => el('button', { class: 'shape-btn' + (k === cur ? ' on' : ''), title: TIP_SHAPES[k], 'aria-label': TIP_SHAPES[k], onclick: () => { this.setBrushProp('tip', k); } }, icon(k)))));
     if (this.explain) box.append(el('div', { class: 'help' }, help));
@@ -944,7 +971,7 @@ export class Editor {
           select('Used as', b.kind, { draw: 'A drawing brush', blend: 'A blender', erase: 'An eraser' }, v => { b.kind = v; redraw(); }),
           select('Tool you see', b.tool, TOOLS, v => b.tool = v),
           colorInput('Default color', b.color || '#333333', v => { b.color = v; redraw(); }),
-          el('p', { class: 'muted small' }, 'The preview shows the brush going over blue and yellow paint, so you can see how it blends. Every setting has a short explanation.'),
+          el('p', { class: 'muted small' }, 'The preview goes over blue and yellow so you can see how it blends.'),
           prev),
         side);
       redraw();
@@ -986,9 +1013,10 @@ export class Editor {
         el('button', { class: 'btn small primary', title: 'Click or drag on the page to take a color (I, or hold Alt with any brush)', onclick: () => this.setTool('pick') }, '⌖ Pick from page'),
         'EyeDropper' in window ? el('button', { class: 'btn small', title: 'Take a color from anywhere on your screen, even outside this app', onclick: () => this.pickFromScreen() }, 'Pick from screen') : null,
         el('button', { class: 'btn small', title: 'Copy the hex code of your color', onclick: () => this.copyHex() }, 'Copy hex')),
-      el('div', { class: 'param' }, select('Pick takes color from', this.pickFrom, { all: 'Everything you see', layer: 'Only the selected layer' }, v => { this.pickFrom = v; setSetting('pickFrom', v); }), this.explain ? el('div', { class: 'help' }, 'Everything you see mixes all layers and the paper. Only the selected layer skips the paper and other layers.') : null),
-      el('div', { class: 'param' }, select('Pick size', String(this.pickSize), { 1: 'One pixel', 3: 'Average of 3 x 3', 5: 'Average of 5 x 5', 11: 'Average of 11 x 11' }, v => { this.pickSize = +v; setSetting('pickSize', +v); }), this.explain ? el('div', { class: 'help' }, 'A bigger area averages the paper grain and brush streaks, so you get the color you mean.') : null),
-      check('Stay on Pick color after picking', this.pickStay, v => { this.pickStay = v; setSetting('pickStay', v); }),
+      el('details', { class: 'sub' }, el('summary', {}, 'Pick color options'),
+        el('div', { class: 'param' }, select('Copy from', this.pickFrom, { all: 'Everything you see', layer: 'Only this layer' }, v => { this.pickFrom = v; setSetting('pickFrom', v); }), this.explain ? el('div', { class: 'help' }, 'Only this layer skips the paper and other layers.') : null),
+        el('div', { class: 'param' }, select('Area', String(this.pickSize), { 1: '1 pixel', 3: '3 x 3 average', 5: '5 x 5 average', 11: '11 x 11 average' }, v => { this.pickSize = +v; setSetting('pickSize', +v); }), this.explain ? el('div', { class: 'help' }, 'Bigger areas ignore paper grain and streaks.') : null),
+        check('Stay on Pick color after picking', this.pickStay, v => { this.pickStay = v; setSetting('pickStay', v); })),
       sw(PALETTE));
     if (this.recent.length) wrap.append(el('div', { class: 'muted small' }, 'Recent'), sw(this.recent));
     wrap.append(el('div', { class: 'row' }, el('span', { class: 'muted small grow' }, 'My palette'), el('button', { class: 'btn small', onclick: () => { if (!this.myPalette.includes(this.color)) { this.myPalette = [...this.myPalette, this.color].slice(-36); setSetting('myPalette', this.myPalette); this.renderPanels(); } } }, '+ Save color')));
@@ -1005,7 +1033,7 @@ export class Editor {
       const c = mixPaint(this.color, this.color2, t); res.style.background = c; res.dataset.c = c; res.textContent = c;
     };
     res.onclick = () => this.setColor(res.dataset.c);
-    box.append(el('p', { class: 'muted small' }, 'Mixes your main and second color like real paint on a palette. Blue and yellow make green. Click a swatch to paint with it.'), strip,
+    box.append(el('p', { class: 'muted small' }, 'Mixes your two colors like real paint. Click a swatch to use it.'), strip,
       slider('Amount of second color', t, 0, 1, 0.01, v => { t = v; upd(); }, v => Math.round(v * 100) + '%'), res);
     upd();
     return box;
@@ -1073,8 +1101,8 @@ export class Editor {
         select('Layer blend', A.blend || 'source-over', BLENDS, v => this.setLayerProp(A, 'blend', v)));
     }
     out.append(el('details', { class: 'explain' }, el('summary', {}, 'What are layers?'),
-      el('p', {}, 'Layers are like clear sheets stacked on the page. The top of the list is the top sheet. Draw on its own layer so you can change one part without touching the rest.'),
-      el('p', {}, 'Protect transparent: paint only where that layer already has paint, great for shading inside a shape. Clip to below: the layer only shows inside the layer under it. Lock: nothing can change it. Merge: combine layers into one.')));
+      el('p', {}, 'Layers are clear sheets stacked on the page. The top of the list is on top. Put each part on its own layer to change it alone.'),
+      el('p', {}, 'Protect transparent: paint only on what is there. Clip: show only inside the layer below. Lock: nothing changes it. Merge: join layers.')));
     return out;
   }
   historyList() {
@@ -1191,17 +1219,27 @@ export class Editor {
     this.res[L.id] = await mediaRes(L);
     this.pushState(before, 'Replace picture'); this.changed(); this.renderPanels(); this.dirty = true;
   }
+  setName(v) {
+    v = String(v || '').trim().slice(0, 60);
+    if ((this.page.title || '') === v) return;
+    this.page.title = v; this.nameI.value = v; this.changed(true);
+    toast(v ? `Named "${v}".` : 'Name removed.');
+  }
   pageControls() {
     const P = this.page, bp = this.book.paper;
     const papers = { book: 'Same as book', ...Object.fromEntries(Object.entries(PAPERS).map(([k, v]) => [k, v.name])) };
+    const nm = el('input', { type: 'text', class: 'full', maxlength: 60, value: P.title || '', placeholder: 'Name this art', 'aria-label': 'Page name' });
+    nm.addEventListener('change', () => this.setName(nm.value));
     const out = [
+      el('label', { class: 'row' }, el('span', { class: 'lbl' }, 'Name'), nm),
+      el('div', { class: 'help' }, 'Shown in the book and used as the file name when you export.'),
       select('Paper', P.paper ? P.paper.type : 'book', papers, async v => { P.paper = v === 'book' ? null : { type: v, color: null }; await this.repaper(); this.changed(); }),
       colorInput('Paper tint', (P.paper && P.paper.color) || (PAPERS[(P.paper || bp).type] || PAPERS.sketch).color, async v => { P.paper = { type: (P.paper || bp).type === 'custom' ? 'sketch' : (P.paper || bp).type, color: v }; await this.repaper(); this.changed(); }),
       el('button', { class: 'btn small', onclick: async () => { const fs = await pickFiles('image/*', false); if (!fs[0]) return; const id = await putBlob(fs[0]); P.paper = { type: 'custom', custom: id }; await this.repaper(); this.changed(); } }, 'Use my own paper texture'),
       el('div', { class: 'muted small' }, `${P.w} × ${P.h} px at ${this.book.size.dpi} DPI (${this.book.size.wMM} × ${this.book.size.hMM} mm)`),
     ];
     if (P.history && P.history.length) {
-      out.push(el('div', { class: 'muted small' }, 'Saved versions of this page (from earlier sessions)'));
+      out.push(el('div', { class: 'muted small' }, 'Restore points (one every 5 minutes, about 2 hours back). Click one to go back to it.'));
       const box = el('div', { class: 'history' });
       P.history.forEach((h, i) => box.append(el('button', { class: 'btn small', onclick: () => this.restoreVersion(i) }, new Date(h.t).toLocaleString())));
       out.push(box);
@@ -1230,27 +1268,26 @@ export class Editor {
     };
     for (const [k, v] of Object.entries(KINDS)) if (k !== 'font') tabs.append(el('button', { class: 'btn small', onclick: () => show([k]) }, v));
     tabs.append(el('button', { class: 'btn small primary', onclick: async () => { const fs = await pickFiles(MEDIA_ACCEPT, true); if (!fs.length) return; const added = await importFiles(fs, 'art'); toast(`Imported ${added.length} file(s).`); show(['art', 'media']); } }, 'Import pictures, GIFs or videos'));
-    body.append(el('p', { class: 'muted small' }, 'Click anything to put it on the page. PNG, JPG, WEBP, GIF (moving), SVG, AVIF, BMP and short MP4 or WebM clips work.'), tabs);
+    body.append(el('p', { class: 'muted small' }, 'Click anything to add it. Pictures, GIFs and short videos work.'), tabs);
     const m = modal('Add to the page', body, { wide: true });
     show(['art', 'sticker', 'made', 'media']);
   }
 
   showKeys() {
     modal('Keys and controls', el('div', { class: 'keys' },
-      el('p', { class: 'muted' }, 'Mouse: left button draws, double-click opens the quick menu, middle drag or Space moves the page, scroll zooms. The right button does nothing, so no menus pop up. A pen tablet gives pressure.'),
+      el('p', { class: 'muted' }, 'Left button draws. Double-click opens the quick menu. Scroll zooms. Middle-drag or Space moves the page. Pen tablets give pressure.'),
       el('table', { class: 'keytable' }, KEYS.map(([k, v]) => el('tr', {}, el('td', {}, el('kbd', {}, k)), el('td', {}, v))))), { wide: false });
   }
   showTips() {
     const tip = (t, d) => el('div', { class: 'g-step' }, el('span', { class: 'g-n' }, '•'), el('div', {}, el('h3', {}, t), el('p', {}, d)));
     modal('Drawing on a page', el('div', { class: 'guide' },
-      tip('Tools are at the bottom', 'Draw, Blend, Erase, Fill, Pick color, Select & move, Text and Pan. Hover any button to see what it does and its key.'),
-      tip('Quick menu and colors', 'Double-click the page for the quick menu with every setting. Click your color at the bottom (or press C) for the color wheel. Hold Alt and click to take a color from the page.'),
-      tip('Zoom fast', 'Scroll to zoom. Press 1, 2 or 3 for 100%, 200% or 400% right where your cursor is, and 0 to fit. Hold Z and click or drag to zoom.'),
-      tip('Brushes and settings are on the right', 'Pick a brush to see what it is for. Every setting has a short line that explains it. Change anything, then press "Save as my own brush" to keep it.'),
-      tip('Colors mix like paint', 'Oil, acrylic, gouache, pastels and blenders pick up the paint under them, so going over blue with yellow makes green. Use the Blend tool to smudge, soften or melt colors with water.'),
-      tip('Layers keep things separate', 'Put sketch, color and details on different layers. Lock a layer so nothing changes it. "Protect transparent" lets you shade inside a shape without going outside it.'),
-      tip('Pick and move freely', 'With Select & move, Shift-click or drag a box to pick several pictures or text and move them together. Locked things never move by accident.'),
-      tip('Nothing is lost', 'Undo and Redo are at the bottom, and History on the right lets you jump back to any step. Your page saves by itself.')), { wide: true, buttons: [{ label: 'Got it', primary: true, onClick: c => c() }] });
+      tip('Draw', 'Tools are at the bottom. Brushes and their settings are on the right. Hover anything to see what it does.'),
+      tip('Colors', 'Click your color at the bottom (or press C) for the color wheel. Hold Alt and click to copy a color from the page.'),
+      tip('Blend', 'Paints mix like real paint: blue + yellow = green. Press S for blenders. Drag sets how far colors smear.'),
+      tip('Quick menu', 'Double-click the page (or press Q) for every setting, colors and zoom in one place.'),
+      tip('Zoom', 'Scroll to zoom. 1, 2, 3 zoom to 100, 200, 400%. 0 fits the page.'),
+      tip('Layers', 'Keep sketch, color and details on separate layers. Lock a layer so nothing changes it.'),
+      tip('Name and save', 'Name your art in the box at the top. It saves by itself, and keeps a restore point every 5 minutes.')), { wide: true, buttons: [{ label: 'Got it', primary: true, onClick: c => c() }] });
   }
 
   // ---------- keys ----------
@@ -1317,8 +1354,15 @@ export class Editor {
   }
 
   // ---------- save ----------
+  updStatus(justSaved) {
+    if (!this.status || this.isChanged || (this.saving && !justSaved)) return;
+    if (!this.lastSaved) { this.status.textContent = 'Saved'; return; }
+    const m = Math.floor((Date.now() - this.lastSaved) / 60000);
+    this.status.textContent = m < 1 ? 'Saved just now' : `Saved ${m} min ago`;
+    this.status.title = 'Your page saves by itself a few seconds after you stop drawing, and fully every 5 minutes. Ctrl+S saves now.';
+  }
   changed(now) {
-    this.isChanged = true; this.status.textContent = 'Not saved yet';
+    this.isChanged = true; this.editedSinceSnap = true; this.status.textContent = 'Not saved yet';
     clearTimeout(this.saveTimer);
     const tick = () => { if (this.stroking || (performance.now() - (this.lastInput || 0) < 1800)) { this.saveTimer = setTimeout(tick, 800); return; } this.save(); };
     this.saveTimer = setTimeout(now ? () => this.save() : tick, now ? 10 : 2500);
@@ -1333,7 +1377,8 @@ export class Editor {
         const P = this.page;
         const stored = await db.get('pages', P.id);
         // keep the version that was saved before this one, so it can be restored later
-        if (stored && stored.ver > 1) { pushHistory(stored); P.history = stored.history; }
+        const last = stored && stored.history && stored.history[0];
+        if (stored && stored.ver > 1 && (force || !last || Date.now() - last.t > AUTOSAVE_MS)) { pushHistory(stored, 24); P.history = stored.history; } else if (stored) P.history = stored.history;
         for (const id of this.dirtyLayers) {
           const L = P.layers.find(l => l.id === id); if (!L || L.kind !== 'paint' || !this.res || !this.res[id]) continue;
           L.blob = await putBlob(await canvasBlob(this.res[id], 'image/png'));
@@ -1343,7 +1388,7 @@ export class Editor {
         P.ver = (P.ver || 1) + 1; P.updated = Date.now();
         await db.put('pages', P);
         this.book.updated = Date.now(); await db.put('books', this.book);
-        this.status.textContent = 'Saved';
+        this.lastSaved = Date.now(); this.updStatus(true);
         this.app.onPageSaved(P);
       } catch (e) {
         console.error(e); this.isChanged = true;
@@ -1366,6 +1411,7 @@ export class Editor {
   async close() {
     await this.save();
     document.removeEventListener('keydown', this.keyDown); document.removeEventListener('keyup', this.keyUp); window.removeEventListener('blur', this.onBlur);
+    clearInterval(this.autoT); clearInterval(this.statusT); document.removeEventListener('visibilitychange', this.onHide); window.removeEventListener('pagehide', this.onHide);
     this.closeQuick(); this.ro.disconnect();
     this.root.remove(); this.root = null;
     this.res = null; this.stroke = null; this.pre = null; this.paperCanvas = null;
