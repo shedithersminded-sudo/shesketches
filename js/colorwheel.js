@@ -49,7 +49,7 @@ export function colorWheel({ value = '#2a2a2c', size = 210, onInput, onChange, i
     // hue ring
     const cg = g.createConicGradient(-Math.PI / 2, R, R);
     for (let i = 0; i <= 12; i++) cg.addColorStop(i / 12, `hsl(${i * 30},100%,50%)`);
-    g.fillStyle = cg; g.beginPath(); g.arc(R, R, R - 1, 0, 7); g.arc(R, R, R - ring, 0, 7, true); g.fill();
+    g.fillStyle = cg; g.beginPath(); g.arc(R, R, R - 1, 0, Math.PI * 2); g.moveTo(R + R - ring, R); g.arc(R, R, R - ring, 0, Math.PI * 2); g.fill('evenodd');
     // saturation (left to right) and brightness (bottom to top) square
     const x0 = R - half, y0 = R - half, w = half * 2;
     g.fillStyle = hsvToHex(h, 1, 1); g.fillRect(x0, y0, w, w);
