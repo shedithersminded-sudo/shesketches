@@ -18,7 +18,8 @@ const VIEW_KEYS = ['angled', 'top', 'low', 'front', 'left', 'right', 'pageL', 'p
 const BOOK_KEYS = [
   ['O', 'Turn the closed book over to see the back'], ['← / →', 'Turn the page back / forward'], ['Page Up / Page Down', 'Same as the arrows'], ['Home / End', 'Jump to the cover / the back'],
   ['Click a page edge', 'Turn that page'], ['Drag a page corner', 'Turn it by hand (grab a top or bottom corner to curl it)'], ['Double-click a page', 'Draw on it'],
-  ['Right-drag', 'Look around the book'], ['Middle-drag', 'Slide the view'], ['Scroll', 'Zoom in and out'],
+  ['Drag the desk', 'Look around the book (or right-drag anywhere)'], ['Middle-drag', 'Slide the view'], ['Scroll', 'Zoom in and out'],
+  ['H', 'Pick the book up or put it down. Drag the desk to turn it in your hands'], ['G', 'Go to a page number'],
   ['1 to 9, 0', 'Camera angles: angled, top, low, front, left, right, left page, right page, spine, page edges'],
   ['F', 'Flick through the pages like a flip book (F again stops)'], ['Shift + F', 'Flick backwards'],
   ['C', 'Free camera on or off'], ['W A S D', 'Free camera: move'], ['Q / E', 'Free camera: down / up'], ['Shift', 'Free camera: move faster'], ['Drag', 'Free camera: look around'], ['Esc', 'Leave free camera'],
@@ -148,7 +149,7 @@ const app = {
     this.book = b; b.opened = Date.now(); await db.put('books', b);
     const root = $('#app'); root.innerHTML = '';
     const stage = el('div', { class: 'book-stage' });
-    const posLbl = el('span', { class: 'pos-lbl' });
+    const posLbl = el('button', { class: 'pos-lbl', title: 'Go to a page (G)', onclick: () => this.goToPage() });
     this.editBtns = el('span', { class: 'row' });
     this.flickBtn = el('button', { class: 'btn', title: 'Flick through the pages like a flip book (F)', onclick: () => this.flick(1) }, '⏩ Flick');
     const bar = el('header', { class: 'top book-top' },
@@ -162,6 +163,7 @@ const app = {
       el('button', { class: 'btn', onclick: () => this.customize() }, 'Customize'),
       el('button', { class: 'btn', title: 'Drag your stickers, made pieces, art and GIFs onto the cover or any page (T)', onclick: () => this.stickerTray() }, '★ Stickers'),
       el('button', { class: 'btn', title: 'Draw on any part: covers, insides, spine, page edges or the desk', onclick: e => this.surfaceMenu(e.currentTarget) }, '✎ Draw on…'),
+      this.holdBtn = el('button', { class: 'btn', title: 'Pick the book up to look at it in your hands (H)', onclick: () => this.book3d.setHold(!this.book3d.held) }, '✋ Pick up'),
       this.turnBtn = el('button', { class: 'btn', title: 'Turn the closed book over to see the back cover (O)', onclick: () => this.toggleFlip() }, '⟲ Turn over'),
       this.flickBtn,
       el('button', { class: 'btn', onclick: () => openExport(this, b, { tab: 'video', pageIndex: this.currentPage() }) }, 'Export'),
@@ -191,6 +193,7 @@ const app = {
     this.bindStickerDrag();
     this.book3d.on('camera', () => this.updPad());
     this.book3d.on('free', on => { stage.classList.toggle('free', on); this.viewPad.querySelector('.free-btn').classList.toggle('lit', on); });
+    this.book3d.on('hold', on => { this.holdBtn.classList.toggle('lit', on); this.holdBtn.textContent = on ? '✋ Put down' : '✋ Pick up'; });
     this.book3d.on('flickEnd', () => this.flickBtn.textContent = '⏩ Flick');
     await this.book3d.setBook(b);
     this.updatePos(posLbl); this.updPad();
@@ -210,6 +213,8 @@ const app = {
       else if (e.key === 'End') B.goTo(B.maxPos);
       else if (k === 'f') this.flick(e.shiftKey ? -1 : 1);
       else if (k === 'c') B.setFree(!B.free);
+      else if (k === 'h') B.setHold(!B.held);
+      else if (k === 'g') { e.preventDefault(); this.goToPage(); }
       else if (k === 'r') this.toggleRecord();
       else if (k === 't') this.stickerTray();
       else if (k === 'k' || e.key === '?') this.bookKeysPanel();
@@ -225,19 +230,24 @@ const app = {
   },
   // the camera pad: a dial you click or drag to aim the camera, plus quick angle buttons
   makeViewPad() {
-    const dial = el('div', { class: 'vp-dial', title: 'Click or drag to aim the camera. Center is straight down, the edge is level with the desk. Up is the front.' }, el('span', { class: 'vp-dot' }), el('span', { class: 'vp-n' }, 'front'), el('span', { class: 'vp-s' }, 'back'), el('span', { class: 'vp-w' }, 'L'), el('span', { class: 'vp-e' }, 'R'));
+    const dial = el('div', { class: 'vp-dial', tabindex: 0, role: 'group', 'aria-label': 'Camera dial. Arrow keys move the camera.', title: 'The dot is where you stand. Drag it around the book. Middle = looking straight down, edge = low. Arrow keys work too.' }, el('span', { class: 'vp-dot' }), el('span', { class: 'vp-n' }, 'front'), el('span', { class: 'vp-s' }, 'back'), el('span', { class: 'vp-w' }, 'L'), el('span', { class: 'vp-e' }, 'R'));
     const aim = (e, animate) => {
       const r = dial.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * 2 - 1, y = (e.clientY - r.top) / r.height * 2 - 1;
-      const rad = Math.min(1, Math.hypot(x, y)), az = Math.atan2(x, -y) * 180 / Math.PI;
+      const rad = Math.min(1, Math.hypot(x, y)), az = Math.atan2(x, y) * 180 / Math.PI;
       const cur = this.book3d.getAngles();
-      this.book3d.orbitTo(az, 90 - rad * 85, cur.d, 0, animate);
+      this.book3d.orbitTo(az, 90 - rad * 85, cur.d, 0, animate, true);
     };
     let dragging = false;
     dial.addEventListener('pointerdown', e => { dragging = true; try { dial.setPointerCapture(e.pointerId); } catch (_) { } aim(e, true); });
     dial.addEventListener('pointermove', e => { if (dragging) aim(e, false); });
     dial.addEventListener('pointerup', () => dragging = false);
+    dial.addEventListener('pointercancel', () => dragging = false);
+    dial.addEventListener('keydown', e => {
+      const m = { ArrowLeft: [-6, 0], ArrowRight: [6, 0], ArrowUp: [0, 5], ArrowDown: [0, -5] }[e.key]; if (!m) return;
+      e.preventDefault(); e.stopPropagation(); this.book3d.orbitBy(m[0] * (e.shiftKey ? 3 : 1), m[1] * (e.shiftKey ? 3 : 1));
+    });
     const zoom = el('input', { type: 'range', min: 0.25, max: 2.5, step: 0.01, value: 1, 'aria-label': 'Zoom', title: 'Zoom' });
-    zoom.addEventListener('input', () => { const a = this.book3d.getAngles(); this.book3d.orbitTo(a.az, a.el, +zoom.value, 0, false); });
+    zoom.addEventListener('input', () => { const a = this.book3d.getAngles(); this.book3d.orbitTo(a.az, a.el, +zoom.value, 0, false, true); });
     this.padZoom = zoom;
     const vb = (k, label) => el('button', { title: Book3D.VIEWS[k].name + ' (' + ((VIEW_KEYS.indexOf(k) + 1) % 10) + ')', onclick: () => this.book3d.viewTo(k) }, label);
     const pad = el('div', { class: 'view-pad' },
@@ -252,7 +262,7 @@ const app = {
   updPad() {
     if (!this.book3d || !this.viewPad) return;
     const a = this.book3d.getAngles(), rad = (90 - a.el) / 85, r = a.az * Math.PI / 180;
-    const dot = this.viewPad.querySelector('.vp-dot'); dot.style.left = (50 + Math.sin(r) * rad * 46) + '%'; dot.style.top = (50 - Math.cos(r) * rad * 46) + '%';
+    const dot = this.viewPad.querySelector('.vp-dot'); dot.style.left = (50 + Math.sin(r) * rad * 46) + '%'; dot.style.top = (50 + Math.cos(r) * rad * 46) + '%';
     if (this.padZoom && document.activeElement !== this.padZoom) this.padZoom.value = a.d;
   },
   // ---------- sticker tray ----------
@@ -437,6 +447,12 @@ const app = {
       el('p', { class: 'muted' }, 'Everything here also has a button. The camera pad at the bottom right aims the camera with one click.'),
       el('table', { class: 'keytable' }, BOOK_KEYS.map(([k, v]) => el('tr', {}, el('td', {}, el('kbd', {}, k)), el('td', {}, v))))));
   },
+  async goToPage() {
+    const N = this.book.pages.length, n = parseInt(await promptBox(`Go to page (1 to ${N})`, String(this.currentPage() + 1)), 10);
+    if (!n || !this.book3d) return;
+    const i = Math.max(1, Math.min(N, n)) - 1; // page i shows on spread floor((i + 1) / 2) + 1
+    this.book3d.goTo(Math.floor((i + 1) / 2) + 1);
+  },
   currentPage() { const [l, r] = this.book3d ? this.book3d.spread() : [null, 0]; return r ?? l ?? 0; },
   updatePos(lbl) {
     const [l, r] = this.book3d.spread(), N = this.book.pages.length;
@@ -527,6 +543,7 @@ const app = {
         colorInput('Cover color', c.color, v => { c.color = v; apply(); }),
         slider('Wear and age', c.wear ?? 0.25, 0, 1, 0.01, v => { c.wear = v; apply(); }, v => Math.round(v * 100) + '%'),
         slider('Board thickness', c.thickness || 1, 0.4, 3, 0.05, v => { c.thickness = v; apply(); }, v => v.toFixed(2) + '×'),
+        check('Clear plastic front cover (page 1 shows through)', !!c.clear, v => { c.clear = v; apply(); }),
         select('Metal corners', c.corners && c.corners !== 0.02 ? c.corners : 'none', { none: 'None', gold: 'Gold', silver: 'Silver', brass: 'Brass', black: 'Black' }, v => { c.corners = v; apply(); }),
         el('h3', {}, 'Stickers on the cover'),
         el('div', { class: 'row wrap' },

@@ -83,7 +83,9 @@ export class Book3D {
     this.deskArt = new THREE.Mesh(new THREE.PlaneGeometry(DESK_ART, DESK_ART), this.deskArtMat);
     this.deskArt.rotation.x = -PI / 2; this.deskArt.position.y = -0.0002; this.deskArt.receiveShadow = true; this.deskArt.visible = false;
     s.add(this.deskArt);
-    this.group = new THREE.Group(); s.add(this.group);
+    // holder: the hands that pick the book up; group: the book itself (turned over by applyFlip)
+    this.holder = new THREE.Group(); s.add(this.holder);
+    this.group = new THREE.Group(); this.holder.add(this.group);
   }
 
   setDesk(kind, color, opts = {}) {
@@ -188,9 +190,16 @@ export class Book3D {
     }
     const gF = new THREE.BufferGeometry(); gF.setAttribute('position', pos); gF.setAttribute('uv', new THREE.BufferAttribute(uvF, 2)); gF.setIndex(idx);
     gF.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nV * 3), 3));
+    // the gutter: paper near the spine sits in shadow, and the outer edge catches a little less light
+    const col = new Float32Array(nV * 3);
+    for (let r = 0; r <= SEG_Y; r++) for (let i = 0; i <= SEG_X; i++) {
+      const u = i / SEG_X, k = (1 - 0.34 * Math.exp(-u / 0.05) - 0.12 * Math.exp(-u / 0.16)) * (1 - 0.05 * Math.exp(-(1 - u) / 0.03)), v = (r * (SEG_X + 1) + i) * 3;
+      col[v] = col[v + 1] = col[v + 2] = k;
+    }
+    gF.setAttribute('color', new THREE.BufferAttribute(col, 3));
     const gB = new THREE.BufferGeometry(); gB.setAttribute('position', pos); gB.setAttribute('uv', new THREE.BufferAttribute(uvB, 2)); gB.setIndex(idx);
-    gB.setAttribute('normal', gF.attributes.normal);
-    const mat = side => new THREE.MeshStandardMaterial({ map: this.blankTex, color: '#ffffff', roughness: 0.93, metalness: 0, side, normalMap: this.normalTex, normalScale: new THREE.Vector2(this.paperRelief, this.paperRelief) });
+    gB.setAttribute('normal', gF.attributes.normal); gB.setAttribute('color', gF.attributes.color);
+    const mat = side => new THREE.MeshStandardMaterial({ map: this.blankTex, color: '#ffffff', roughness: 0.93, metalness: 0, side, vertexColors: true, normalMap: this.normalTex, normalScale: new THREE.Vector2(this.paperRelief, this.paperRelief) });
     const front = new THREE.Mesh(gF, mat(THREE.FrontSide)), back = new THREE.Mesh(gB, mat(THREE.BackSide));
     for (const m of [front, back]) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; this.group.add(m); }
     return { front, back, geo: gF, leaf: -999 };
@@ -232,6 +241,7 @@ export class Book3D {
     const cv = await this.coverCanvas(b, W / H);
     const tile = coverTile(b.cover.material, b.cover.color);
     const art = new THREE.CanvasTexture(cv); art.colorSpace = THREE.SRGBColorSpace; art.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    const clear = !!b.cover.clear;
     const nrm = new THREE.CanvasTexture(tile.normal); nrm.wrapS = nrm.wrapT = THREE.RepeatWrapping; nrm.repeat.set(3 * W, 3 * H);
     const plain = new THREE.CanvasTexture(tile.canvas); plain.wrapS = plain.wrapT = THREE.RepeatWrapping; plain.colorSpace = THREE.SRGBColorSpace;
     const fx = this.coverFX(b, cv, tile, W, H);
@@ -249,8 +259,14 @@ export class Book3D {
     const geo = new THREE.BoxGeometry(W, T, H, 1, 1, 1); geo.translate(W / 2, T / 2, 0);
     // order: +x, -x, +y, -y, +z, -z
     this.cover = new THREE.Group();
-    const cm = new THREE.Mesh(geo, [edgeM, edgeM, outside, inside, edgeM, edgeM]);
-    cm.castShadow = cm.receiveShadow = true; cm.position.x = this.gap * 0.5;
+    let faces = [edgeM, edgeM, outside, inside, edgeM, edgeM];
+    if (clear) { // a sheet of clear plastic: page 1 shows through it
+      const pl = o => new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.05, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03, transparent: true, depthWrite: false, ...o });
+      const top = pl({ map: art }), under = pl({ color: '#e9f1f6', opacity: 0.1 }), rim = pl({ color: '#d4e2ea', opacity: 0.55 });
+      faces = [rim, rim, top, under, rim, rim];
+    }
+    const cm = new THREE.Mesh(geo, faces);
+    cm.castShadow = !clear; cm.receiveShadow = true; cm.position.x = this.gap * 0.5;
     this.cover.add(cm); this.coverMesh = cm;
     this.group.add(this.cover);
     // metal corner protectors
@@ -323,15 +339,16 @@ export class Book3D {
 
   // the side of the page block: one fine line per sheet, in the paper or edge color, plus any fore-edge painting
   foreEdgeCanvas(color, art) {
-    const sheets = Math.max(1, this.L || 1), Hc = Math.min(1024, Math.max(128, sheets * 4)), Wc = 1024;
+    const sheets = Math.max(1, this.L || 1), Hc = Math.min(2048, Math.max(128, sheets * 6)), Wc = 1024;
     const c = document.createElement('canvas'); c.width = Wc; c.height = Hc; const g = c.getContext('2d');
     g.fillStyle = color; g.fillRect(0, 0, Wc, Hc);
     if (art) { g.drawImage(art, 0, 0, Wc, Hc); }
     let sd = 99; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
-    const step = Hc / sheets;
+    const step = Hc / sheets, dark = lum(color) < 0.3;
+    // each sheet: a dark gap between sheets and a lit paper edge, so the lines read on light and dark paper
     for (let i = 0; i < sheets; i++) {
-      const y = i * step; g.fillStyle = `rgba(0,0,0,${0.1 + rnd() * 0.1})`; g.fillRect(0, y, Wc, Math.max(0.6, step * 0.22));
-      if (rnd() < 0.3) { g.fillStyle = 'rgba(255,255,255,0.08)'; g.fillRect(0, y + step * 0.5, Wc, Math.max(0.5, step * 0.2)); }
+      const y = i * step; g.fillStyle = `rgba(0,0,0,${(dark ? 0.35 : 0.14) + rnd() * 0.1})`; g.fillRect(0, y, Wc, Math.max(0.7, step * 0.22));
+      g.fillStyle = `rgba(255,255,255,${(dark ? 0.12 : 0.06) + rnd() * 0.06})`; g.fillRect(0, y + step * 0.45, Wc, Math.max(0.6, step * 0.2));
     }
     // tiny waviness so the pages do not look perfectly cut
     g.globalAlpha = 0.06; for (let i = 0; i < 60; i++) { g.fillStyle = rnd() < 0.5 ? '#000' : '#fff'; g.fillRect(rnd() * Wc, 0, 1 + rnd() * 3, Hc); }
@@ -469,8 +486,9 @@ export class Book3D {
     const Hc = 1600, Wc = Math.round(Hc * aspect), c = document.createElement('canvas');
     c.width = Wc; c.height = Hc;
     const g = c.getContext('2d');
-    const tile = coverTile(b.cover.material, b.cover.color);
-    g.fillStyle = g.createPattern(tile.canvas, 'repeat'); g.fillRect(0, 0, Wc, Hc);
+    const tile = coverTile(b.cover.material, b.cover.color), clear = !!b.cover.clear;
+    if (clear) { g.fillStyle = 'rgba(235,242,248,0.07)'; g.fillRect(0, 0, Wc, Hc); }
+    else { g.fillStyle = g.createPattern(tile.canvas, 'repeat'); g.fillRect(0, 0, Wc, Hc); }
     let coverPage = null;
     if (pageOverride) coverPage = pageOverride; else if (b.coverPage) coverPage = await db.get('pages', b.coverPage);
     if (b.cover.art || (coverPage && coverPage.ver > 1)) {
@@ -486,13 +504,19 @@ export class Book3D {
         g.drawImage(im, inset + (bw - dw) / 2, inset + (bh - dh) / 2, dw, dh);
         g.restore();
         // printed look: let the cloth texture show through a little
-        g.globalAlpha = 0.18; g.globalCompositeOperation = 'multiply'; g.fillStyle = g.createPattern(tile.canvas, 'repeat'); g.fillRect(0, 0, Wc, Hc);
+        g.globalAlpha = clear ? 0 : 0.18; g.globalCompositeOperation = 'multiply'; g.fillStyle = g.createPattern(tile.canvas, 'repeat'); g.fillRect(0, 0, Wc, Hc);
         g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
       }
     }
     Book3D.prototype.drawTitle.call(null, g, b, Wc, Hc);
     // wear: darker edges, rubbed corners and scuffs
     const wear = b.cover.wear ?? 0.3;
+    if (clear) { // plastic: fine scratches that catch the light, no dark edges
+      let sd = 777; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+      g.strokeStyle = `rgba(255,255,255,${0.05 + wear * 0.12})`;
+      for (let i = 0; i < 30 + 120 * wear; i++) { g.lineWidth = 0.5 + rnd(); const x = rnd() * Wc, y = rnd() * Hc, l = 8 + rnd() * 120, a = rnd() * 6.28; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+      return c;
+    }
     const vg = g.createRadialGradient(Wc / 2, Hc / 2, Math.min(Wc, Hc) * 0.4, Wc / 2, Hc / 2, Math.max(Wc, Hc) * 0.75);
     vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, `rgba(0,0,0,${0.08 + wear * 0.35})`);
     g.fillStyle = vg; g.fillRect(0, 0, Wc, Hc);
@@ -712,7 +736,7 @@ export class Book3D {
     const page = await db.get('pages', id);
     if (!page) return null;
     const key = id + ':' + page.ver + ':' + (this.hiRes || 0);
-    if (this.texCache.has(key)) return this.texCache.get(key);
+    if (this.texCache.has(key)) { const t = this.texCache.get(key); this.texCache.delete(key); this.texCache.set(key, t); return t; } // most recently used stays longest
     let tex;
     if (this.hiRes) {
       const c = await renderPage(page, this.book, { scale: Math.min(1, this.hiRes / page.h), pageNumber: this.book.pageNumbers ? idx + 1 : 0 });
@@ -756,7 +780,8 @@ export class Book3D {
     await Promise.all(jobs);
     // load the next sheets in the background so turning never waits
     const base = Math.max(0, this.pos - 1);
-    for (const j of [base + 2, base - 3]) if (j >= 0 && j < this.L) { this.pageTexture(j * 2); this.pageTexture(j * 2 + 1); }
+    const q = this.queued || 0, ahead = q > 0 ? [base + 2, base + 3] : q < 0 ? [base - 3, base - 4] : [base + 2, base - 3];
+    for (const j of ahead) if (j >= 0 && j < this.L) { this.pageTexture(j * 2); this.pageTexture(j * 2 + 1); }
     await this.checkMotion();
   }
 
@@ -797,10 +822,26 @@ export class Book3D {
   get maxPos() { return this.L + 1; }
   canNext() { return this.pos < this.maxPos && !this.anim && !this.flipped && !this.flipAnim; }
   canPrev() { return this.pos > 0 && !this.anim && !this.flipped && !this.flipAnim; }
-  next() { if (this.canNext()) this.startTurn(1, 0, PI); }
-  prev() { if (this.canPrev()) this.startTurn(-1, PI, 0); }
+  // where the book lands once the turn in progress and the queued turns are done
+  get endPos() { const a = this.anim; return (a && !a.cancel ? this.pos + a.dir : this.pos) + (this.queued || 0); }
+  next() { this.step(1); }
+  prev() { this.step(-1); }
+  // clicks during a turn are queued, so three quick clicks always turn three pages
+  step(d) {
+    if (this.flipped || this.flipAnim) return;
+    if (this.anim) { const e = this.endPos + d; if (e >= 0 && e <= this.maxPos) this.queued = (this.queued || 0) + d; return; }
+    this.queued = 0;
+    if (d > 0 ? this.canNext() : this.canPrev()) d > 0 ? this.startTurn(1, 0, PI) : this.startTurn(-1, PI, 0);
+  }
+  runQueue() {
+    const q = this.queued || 0; if (!q) return;
+    const d = Math.sign(q); this.queued -= d;
+    if (d > 0 ? this.pos >= this.maxPos : this.pos <= 0) { this.queued = 0; return; }
+    const fast = Math.max(0.18, (this.book.flip?.speed ?? 0.9) * (Math.abs(q) > 1 ? 0.35 : 0.6));
+    d > 0 ? this.startTurn(1, 0, PI, fast) : this.startTurn(-1, PI, 0, fast);
+  }
   goTo(p, animate = false) {
-    p = Math.max(0, Math.min(this.maxPos, p));
+    p = Math.max(0, Math.min(this.maxPos, p)); this.queued = 0;
     if (animate && Math.abs(p - this.pos) === 1) return p > this.pos ? this.next() : this.prev();
     this.turn = null; this.anim = null; this.pos = p;
     this.applyState(); this.refreshTextures(); this.emit('pos', this.pos);
@@ -828,27 +869,40 @@ export class Book3D {
     this.turn = null;
     this.applyState(); this.refreshTextures();
     this.emit('pos', this.pos);
+    this.runQueue();
   }
 
   // ---------- pointer ----------
   bindPointer() {
-    const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.01), hit = new THREE.Vector3();
+    const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.01), hit = new THREE.Vector3(), inv = new THREE.Matrix4();
+    // where the pointer is on the book, in the book's own space (it may be picked up)
     const toBook = (e) => {
       const r = this.canvas.getBoundingClientRect();
       ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
       ray.setFromCamera(ndc, this.camera);
+      this.holder.updateMatrixWorld(); ray.ray.applyMatrix4(inv.copy(this.holder.matrixWorld).invert());
       return ray.ray.intersectPlane(plane, hit) ? hit.clone() : null;
     };
-    let drag = null;
-    let look = null;
+    const onBook = p => p && Math.abs(p.z) < this.H / 2 + this.over + 0.03 && (this.pos === 0 ? p.x > -0.05 && p.x < this.W + this.over + 0.05 : Math.abs(p.x) < this.W + this.over + 0.05);
+    let drag = null, look = null, spin = null;
     this.canvas.addEventListener('pointerdown', e => {
       if (this.free) { look = { x: e.clientX, y: e.clientY }; try { this.canvas.setPointerCapture(e.pointerId); } catch (_) { } return; }
-      if (e.button !== 0 || !this.book || this.anim) return;
-      const p = toBook(e); if (!p) return;
+      if (e.button !== 0 || !this.book) return;
+      const p = toBook(e);
+      // off the book: drag to look around it (or to turn it in your hands when picked up)
+      if (!onBook(p)) { spin = { x: e.clientX, y: e.clientY, id: e.pointerId }; try { this.canvas.setPointerCapture(e.pointerId); } catch (_) { } this.canvas.style.cursor = 'grabbing'; return; }
+      if (this.anim) return;
       drag = { x0: e.clientX, y0: e.clientY, p0: p, started: false, id: e.pointerId };
     });
     this.canvas.addEventListener('pointermove', e => {
       if (look) { this.freeLook(e.clientX - look.x, e.clientY - look.y); look = { x: e.clientX, y: e.clientY }; return; }
+      if (spin) {
+        if (e.pointerId !== spin.id) return;
+        const dx = e.clientX - spin.x, dy = e.clientY - spin.y; spin.x = e.clientX; spin.y = e.clientY;
+        if (this.held) { this.holdSpin.y += dx * 0.008; this.holdSpin.x = Math.max(-1.2, Math.min(1.2, this.holdSpin.x + dy * 0.008)); this.dirty = true; }
+        else this.orbitBy(-dx * 0.35, dy * 0.3);
+        return;
+      }
       if (!drag || e.pointerId !== drag.id) return;
       const p = toBook(e); if (!p) return;
       const moved = Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0);
@@ -871,6 +925,7 @@ export class Book3D {
     });
     const up = e => {
       if (look) { look = null; return; }
+      if (spin) { spin = null; this.canvas.style.cursor = ''; return; }
       if (!drag || e.pointerId !== drag.id) return;
       const d = drag; drag = null;
       if (d.started) {
@@ -959,13 +1014,19 @@ export class Book3D {
     const v = Book3D.VIEWS[name]; if (!v) return;
     this.view = name; this.orbitTo(v.az, v.el, v.d, v.tx || 0, animate);
   }
-  orbitTo(az, el, dmul = 1, tx = 0, animate = true) {
+  // keepTarget: turn around the spot you are looking at now (camera pad, drags), not the middle of the book
+  orbitTo(az, el, dmul = 1, tx = 0, animate = true, keepTarget = false) {
     if (this.free) this.setFree(false);
     const closedTall = this.tall() && this.pos === 0;
-    const d = ((closedTall ? this.homeDistClosed : this.homeDist) || 3) * dmul, a = az * PI / 180, e = Math.min(89.5, el) * PI / 180;
-    const tgt = new THREE.Vector3(tx * this.W + (closedTall && !tx ? (this.W + this.over) / 2 : 0), 0, 0.02);
-    const pos = new THREE.Vector3(tgt.x + Math.sin(a) * Math.cos(e) * d, Math.sin(e) * d, tgt.z + Math.cos(a) * Math.cos(e) * d);
-    if (!animate || this.reducedMotion) { this.camera.position.copy(pos); this.controls.target.copy(tgt); this.controls.update(); this.dirty = true; return; }
+    const d = ((closedTall ? this.homeDistClosed : this.homeDist) || 3) * dmul, a = az * PI / 180, e = Math.max(1, Math.min(89.5, el)) * PI / 180;
+    const tgt = keepTarget ? (this.camAnim ? this.camAnim.t1 : this.controls.target).clone() : new THREE.Vector3(tx * this.W + (closedTall && !tx ? (this.W + this.over) / 2 : 0), 0, 0.02);
+    const pos = new THREE.Vector3(tgt.x + Math.sin(a) * Math.cos(e) * d, tgt.y + Math.sin(e) * d, tgt.z + Math.cos(a) * Math.cos(e) * d);
+    if (!animate || this.reducedMotion) {
+      // jump now: stop any camera slide, and turn damping off for this update so the controls do not drift back
+      this.camAnim = null; this.controls.enableDamping = false;
+      this.camera.position.copy(pos); this.controls.target.copy(tgt); this.controls.update();
+      this.controls.enableDamping = !this.reducedMotion; this.dirty = true; return;
+    }
     this.camAnim = { p0: this.camera.position.clone(), t0: this.controls.target.clone(), p1: pos, t1: tgt, s: performance.now(), dur: 650 };
   }
   tall() { return (this.camera.aspect || 1.6) < 0.95; }
@@ -975,6 +1036,7 @@ export class Book3D {
     const closed = this.pos === 0;
     if (closed !== this.lastClosed) { const first = this.lastClosed === undefined; this.lastClosed = closed; if (!first) this.viewTo(this.view || 'angled'); }
   }
+  orbitBy(daz, del) { const a = this.getAngles(); this.orbitTo(a.az + daz, a.el + del, a.d, 0, false, true); }
   getAngles() {
     const o = this.camera.position.clone().sub(this.controls.target), d = o.length();
     return { az: Math.atan2(o.x, o.z) * 180 / PI, el: Math.asin(Math.max(-1, Math.min(1, o.y / d))) * 180 / PI, d: d / (this.homeDist || 3) };
@@ -996,6 +1058,34 @@ export class Book3D {
   freeLook(dx, dy) { this.yaw -= dx * 0.004; this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch - dy * 0.004)); this.applyFreeLook(); }
   applyFreeLook() { const d = new THREE.Vector3(-Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), -Math.cos(this.yaw) * Math.cos(this.pitch)); this.camera.lookAt(this.camera.position.clone().add(d)); this.dirty = true; }
 
+  // pick the book up: it lifts toward you and leans to face the camera; drag off the book to turn it in your hands
+  setHold(on) { this.held = !!on; this.holdSpin = { x: 0, y: 0 }; this.holdMoving = true; this.dirty = true; this.emit('hold', this.held); }
+  holdStep(dt) {
+    if (!this.held && !this.holdMoving) return;
+    const tq = this._hq ||= new THREE.Quaternion(), tp = this._hp ||= new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
+    tq.identity(); tp.set(0, 0, 0);
+    if (this.held) {
+      const cam = this.camera.position.clone().sub(this.controls.target); cam.y = Math.max(cam.y, 0.2); cam.normalize();
+      const flat = new THREE.Vector3(cam.x, 0, cam.z).normalize(), side = new THREE.Vector3().crossVectors(Y, flat).normalize();
+      tq.setFromUnitVectors(Y, cam).slerp(new THREE.Quaternion(), 0.4); // lean about 60% of the way toward you
+      tq.premultiply(new THREE.Quaternion().setFromAxisAngle(cam, -this.holdSpin.y)); // spin in your hands
+      tq.premultiply(new THREE.Quaternion().setFromAxisAngle(side, -this.holdSpin.x)); // tip toward or away
+      // turn around the middle of the book, lifted just enough that the low edge clears the desk (it stays framed)
+      const mid = new THREE.Vector3(this.pos === 0 ? (this.W + this.over) / 2 : 0, (this.L * this.t) / 2, 0);
+      const tilt = new THREE.Vector3(0, 1, 0).applyQuaternion(tq).angleTo(Y);
+      const down = new THREE.Vector3(0, 1, 0).applyQuaternion(tq).setY(0).normalize(); // which way the book leans
+      const reach = Math.abs(down.z) * (this.H / 2 + this.over) + Math.abs(down.x) * (this.pos === 0 ? (this.W + this.over) / 2 : this.W);
+      tp.copy(mid).sub(mid.clone().applyQuaternion(tq)).add(new THREE.Vector3(0, reach * Math.sin(tilt) + 0.06, 0));
+    }
+    const k = this.reducedMotion ? 1 : 1 - Math.exp(-dt * 9), h = this.holder, y0 = h.position.y;
+    h.quaternion.slerp(tq, k); h.position.lerp(tp, k);
+    // the camera rises and sinks with the book, so it stays in view
+    if (!this.free && !this.camAnim) { const dy = (h.position.y - y0) * 0.7, ty = Math.max(0, this.controls.target.y + dy); this.camera.position.y += ty - this.controls.target.y; this.controls.target.y = ty; }
+    // angleTo has ~1e-4 rounding noise near zero, so settle at 1e-3 (0.06 degrees) or it redraws forever
+    this.holdMoving = h.quaternion.angleTo(tq) > 1e-3 || h.position.distanceTo(tp) > 1e-4;
+    if (this.holdMoving) this.dirty = true;
+  }
+
   // flip-book: flick through pages quickly, like thumbing a real flip book
   flick(dir = 1, perPage = 0.16) {
     if (this.flicking) { this.flicking = false; return; }
@@ -1010,6 +1100,12 @@ export class Book3D {
     step();
   }
 
+  homeDists() {
+    const aspect = this.camera.aspect || 1.6, fovV = this.camera.fov * PI / 180;
+    const fitW = s => (s / 2) / Math.tan(Math.atan(Math.tan(fovV / 2) * aspect)), distH = (this.H * 1.15 / 2) / Math.tan(fovV / 2);
+    this.homeDist = Math.max(fitW(this.W * 2 + 0.2), distH) * 1.08;
+    this.homeDistClosed = Math.max(fitW(this.W + this.over + 0.2), distH) * 1.08;
+  }
   fit(view = this.view || 'angled') {
     this.view = view;
     const span = this.W * 2 + 0.2;
@@ -1033,7 +1129,8 @@ export class Book3D {
     this.renderer.setSize(w, h, false);
     this.canvas.style.width = '100%'; this.canvas.style.height = '100%';
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
-    if (this.book && !this.free) this.fit(this.view);
+    // a new window size keeps your camera where it is; only the first layout frames the book
+    if (this.book && !this.free) { if (!this.homeDist) this.fit(this.view); else this.homeDists(); }
     this.dirty = true;
   }
 
@@ -1045,6 +1142,7 @@ export class Book3D {
       if (k >= 1) this.camAnim = null; this.dirty = true; this.emit('camera');
     }
     this.freeMove(dt);
+    this.holdStep(dt);
     this.motionTick(now);
     this.reframe();
     this.ribbonStep(dt);
@@ -1058,7 +1156,7 @@ export class Book3D {
       this.turn.theta = a.from + (a.to - a.from) * ease(k);
       this.applyState();
       if (k >= 1) {
-        if (a.cancel) { this.anim = null; this.turn = null; this.applyState(); this.refreshTextures(); }
+        if (a.cancel) { this.anim = null; this.turn = null; this.queued = 0; this.applyState(); this.refreshTextures(); }
         else this.finishTurn();
       }
     }
@@ -1100,6 +1198,7 @@ function ribbonCanvas(color) {
   g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
   return c;
 }
+function lum(hex) { const n = parseInt(String(hex).replace('#', '').padEnd(6, '0').slice(0, 6), 16); return (0.2126 * (n >> 16 & 255) + 0.7152 * (n >> 8 & 255) + 0.0722 * (n & 255)) / 255; }
 function compose(base, art, rot180) {
   if (!art) return base;
   const c = document.createElement('canvas'); c.width = art.width; c.height = art.height; const g = c.getContext('2d');

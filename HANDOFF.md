@@ -61,6 +61,11 @@ No build step. Vanilla JS ES modules. `three` is mapped with an import map in `i
   hard / soft / spiral / ring, many cover materials, metal corners, wear, foil / emboss / label titles,
   gilded edges, endpapers, band, ribbon, 6 desks, light direction and warmth.
   Camera pad with 12 views, free camera (C, then WASD/QE), flick (F), keys list (K).
+  Camera dial is a map seen from above (front at the bottom, the dot is where you stand); it, the zoom slider and arrow keys on the dial orbit around where you are looking (`orbitTo(..., keepTarget)`). Drag the desk (off the book) to look around. Resizing the window no longer resets the camera.
+  Page turns clicked during a turn are queued (`step`, `queued`, `endPos`), so 3 clicks = 3 pages. Click the page label or press G to go to a page number.
+  Pick up (H): `holder` group above `group`; the book leans toward the camera and the camera rises with it; drag the desk to turn it in your hands. Pointer math uses the holder's local space.
+  Clear plastic front cover (Customize > Cover, `cover.clear`): page 1 shows through; cover art and title print on the plastic.
+  Pages darken toward the spine (vertex colors on leaves). Sheet lines on the page block show on dark paper too.
 - **Customize:** four tabs, each with "Show me". Draw your own cover in the full editor.
 - **Saving and names:** saves a few seconds after you stop drawing, fully every 5 minutes, and when you switch tabs or close. A restore point every 5 minutes, 24 kept (about 2 hours), in Page > Restore points. Status shows "Saved X min ago".
   Name a page in the box at the top of the editor (or Page > Name). Names show on the book's Draw buttons and in export file names.
@@ -72,6 +77,7 @@ No build step. Vanilla JS ES modules. `three` is mapped with an import map in `i
 - **Phones and iPad:** pinch zoom, two-finger pan, two-finger tap undo, three-finger tap redo, palm rejection once a pen is used (Fingers setting). Side panel slides in (☰ Brushes), toolbar wraps on two rows under 900 px, bigger touch targets, closed book centered on tall screens. Own GIF reader for Safari (`decodeGifJS`). Lower undo memory on phones and tablets.
 - **Speed:** GIFs redraw only when their frame changes. The editor keeps the finished page as two screen-sized pictures and redraws only what changes (the layer being painted, moving GIFs); hovering costs about 0.2 ms.
   Paint/erase brushes draw into an in-memory copy of the layer (`this.work`) and copy the changed rectangle onto the layer once per pointer move. Wet paint touches are at least 7% of the brush apart (mixing is per distance, so the look is the same), the mixing grid shrinks for small brushes, color math does not allocate, page reads use a per-row tile cache, the blur is two-pass. Result: paint and blenders about 4 to 5 ms per pointer move (was 8 to 12).
+  While painting, the editor keeps the active layer as a screen-sized picture (`drawLive`) and redraws only the area the brush touched since the last frame (`Stroke.viewBox`). Smooth shrinking of a full page costs about 8 ms per canvas, so this took a frame during a stroke from about 14 ms to about 6 ms, same pixels (within 3/255).
   Canvases that are read back pixel by pixel use `willReadFrequently` (makers, paper tiles, brush work canvases, previews). Closed brush groups build only when opened. Book page textures load once even if asked for twice; blank pages keep their first preview.
 - **Gotcha:** `globalCompositeOperation = 'copy'` with `drawImage` wipes the WHOLE canvas, not just the drawn rectangle. Use `clearRect` + normal draw to replace a rectangle (undo had this bug and could erase the rest of a layer; fixed).
 - **Brushes:** Stabilizer (pulled string) in Basics, shown as a dashed line while drawing. Ribbon bookmark is a simulated satin strip that drapes and sways.
@@ -94,6 +100,7 @@ No build step. Vanilla JS ES modules. `three` is mapped with an import map in `i
   Book frame about 1.7 ms. A 200-page book opens in under 1 s.
 
 ## Honest limits
+- GIFs pause while a stroke is in progress and move again when you lift the pen.
 - A single stroke does not mix with itself when it loops back over its own paint.
 - In the 3D book, foil titles look more brown than shiny gold.
 - Videos on pages: 12 fps, up to 15 s, max 720 px, no sound. GIF decoding needs Chrome, Edge or Brave.

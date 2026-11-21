@@ -285,6 +285,8 @@ export class Stroke {
     const b = this.bbox; b[0] = Math.min(b[0], x - r); b[1] = Math.min(b[1], y - r); b[2] = Math.max(b[2], x + r); b[3] = Math.max(b[3], y + r);
     // the area changed since the editor last copied the work onto the layer
     const d = this.dirtyBox || (this.dirtyBox = [1e9, 1e9, -1e9, -1e9]); d[0] = Math.min(d[0], x - r); d[1] = Math.min(d[1], y - r); d[2] = Math.max(d[2], x + r); d[3] = Math.max(d[3], y + r);
+    // the area changed since the editor last redrew the screen (only that part is redrawn while you paint)
+    const v = this.viewBox || (this.viewBox = [1e9, 1e9, -1e9, -1e9]); v[0] = Math.min(v[0], x - r); v[1] = Math.min(v[1], y - r); v[2] = Math.max(v[2], x + r); v[3] = Math.max(v[3], y + r);
   }
   sizeAt(p) { const b = this.b; return b.size * (b.min + (1 - b.min) * Math.pow(p, 1.2)); }
   strengthAt(p) { return 1 - this.b.pOpacity * (1 - Math.min(1, p * 1.25)); }

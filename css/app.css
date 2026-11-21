@@ -44,7 +44,8 @@ textarea.full, input.full { width: 100%; }
 .brand { display: flex; flex-direction: column; line-height: 1.1; }
 .logo { font-family: var(--hand); font-size: 24px; letter-spacing: 2px; color: var(--ink); text-shadow: 2px 2px 0 var(--accent); }
 .book-title { font-family: var(--hand); font-size: 18px; cursor: text; padding: 0 6px; }
-.pos-lbl { font-size: 12px; color: var(--muted); min-width: 150px; text-align: center; }
+.pos-lbl { font-size: 12px; color: var(--muted); min-width: 150px; text-align: center; background: none; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; cursor: pointer; font: inherit; font-size: 12px; }
+.pos-lbl:hover, .pos-lbl:focus-visible { border-color: var(--line); color: var(--text, inherit); }
 
 /* shelf */
 .home { flex: 1; display: grid; grid-template-columns: 1fr 300px; min-height: 0; background: var(--paperbg); }

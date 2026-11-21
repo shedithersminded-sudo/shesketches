@@ -388,8 +388,11 @@ export function deskTile(kind, color = '#2a2420') {
 // Page edge stripes for the side of a page block
 export function edgeTile(paperColor) {
   const c = mk(4, 256), g = c.getContext('2d'), base = rgb(paperColor);
+  // dark paper: darker gaps barely show, so the sheet edges are lit instead
+  const dark = (0.2126 * base[0] + 0.7152 * base[1] + 0.0722 * base[2]) / 255 < 0.3, lift = dark ? 28 : 0;
   for (let y = 0; y < 256; y++) {
-    const k = (y % 4 === 0) ? 0.78 : (y % 4 === 2 ? 0.92 : 1);
+    const k = (y % 4 === 0) ? (dark ? 0.55 : 0.78) : (y % 4 === 2 ? (dark ? 1.5 : 0.92) : 1);
+    if (dark && y % 4 === 2) { g.fillStyle = `rgb(${base[0] * k + lift},${base[1] * k + lift},${base[2] * k + lift})`; g.fillRect(0, y, 4, 1); continue; }
     g.fillStyle = `rgb(${base[0] * k},${base[1] * k},${base[2] * k})`; g.fillRect(0, y, 4, 1);
   }
   return c;

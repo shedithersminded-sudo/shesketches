@@ -242,6 +242,39 @@ export class Editor {
   updZoom() { this.zoomLbl.textContent = Math.round(this.z * 100) + '%'; this.dirty = true; }
   toPage(e) { const r = this.canvas.getBoundingClientRect(); return { x: (e.clientX - r.left - this.px) / this.z, y: (e.clientY - r.top - this.py) / this.z }; }
 
+  // The layer you are painting on, kept as a screen-sized picture. Shrinking a whole page smoothly costs
+  // about 8 ms per canvas, so each frame only the area the brush touched since the last frame is redrawn.
+  drawLive(st, key, dpr) {
+    const P = this.page, L = st.L, W = this.canvas.width, H = this.canvas.height;
+    let c = this._liveC;
+    if (!c || c.width !== W || c.height !== H) { c = this._liveC = document.createElement('canvas'); c.width = W; c.height = H; this.liveKey = null; }
+    const cg = c.getContext('2d');
+    let box = st.s.viewBox; st.s.viewBox = null;
+    if (this.liveKey !== key || this.liveSt !== st) { this.liveKey = key; this.liveSt = st; box = [0, 0, P.w, P.h]; cg.setTransform(1, 0, 0, 1, 0, 0); cg.clearRect(0, 0, W, H); }
+    if (!box) return;
+    // inner: the part of the screen to replace; outer: a bit more around it, so smoothing at the edges is right
+    const k = this.z * dpr, pad = Math.ceil(2 / Math.min(1, this.z)) + 2, cl = (v, m) => Math.max(0, Math.min(m, v));
+    const ix0 = cl(Math.floor(box[0]) - pad, P.w), iy0 = cl(Math.floor(box[1]) - pad, P.h), ix1 = cl(Math.ceil(box[2]) + pad, P.w), iy1 = cl(Math.ceil(box[3]) + pad, P.h);
+    if (ix1 <= ix0 || iy1 <= iy0) return;
+    const ox0 = cl(ix0 - pad, P.w), oy0 = cl(iy0 - pad, P.h), ow = cl(ix1 + pad, P.w) - ox0, oh = cl(iy1 + pad, P.h) - oy0;
+    let t = this._liveT; if (!t || t.width < ow || t.height < oh) { t = this._liveT = document.createElement('canvas'); t.width = Math.max(ow, t?.width || 0); t.height = Math.max(oh, t?.height || 0); }
+    const tg = t.getContext('2d');
+    tg.setTransform(1, 0, 0, 1, 0, 0); tg.globalAlpha = 1; tg.globalCompositeOperation = 'source-over'; tg.clearRect(0, 0, ow, oh);
+    if (this.res[L.id]) tg.drawImage(this.res[L.id], ox0, oy0, ow, oh, 0, 0, ow, oh);
+    if (this.strokeOnCanvas) { // same as the hook in draw(): the stroke so far, on top of the layer
+      tg.globalAlpha = this.preset.opacity; tg.globalCompositeOperation = L.alphaLock ? 'source-atop' : (this.preset.blend || 'source-over');
+      tg.drawImage(this.stroke, ox0, oy0, ow, oh, 0, 0, ow, oh); tg.globalAlpha = 1; tg.globalCompositeOperation = 'source-over';
+    }
+    const X = this.px * dpr, Y = this.py * dpr, sx0 = Math.max(0, Math.floor(X + ix0 * k)), sy0 = Math.max(0, Math.floor(Y + iy0 * k)), sx1 = Math.min(W, Math.ceil(X + ix1 * k)), sy1 = Math.min(H, Math.ceil(Y + iy1 * k));
+    if (sx1 <= sx0 || sy1 <= sy0) return;
+    cg.save(); cg.setTransform(1, 0, 0, 1, 0, 0);
+    cg.beginPath(); cg.rect(sx0, sy0, sx1 - sx0, sy1 - sy0); cg.clip(); cg.clearRect(sx0, sy0, sx1 - sx0, sy1 - sy0);
+    cg.setTransform(k, 0, 0, k, X, Y); cg.beginPath(); cg.rect(0, 0, P.w, P.h); cg.clip();
+    cg.globalAlpha = L.opacity ?? 1; cg.imageSmoothingEnabled = true; cg.imageSmoothingQuality = this.z < 1 ? 'high' : 'medium';
+    cg.drawImage(t, 0, 0, ow, oh, ox0, oy0, ow, oh);
+    cg.restore();
+  }
+
   // ---------- drawing the view ----------
   draw() {
     const g = this.canvas.getContext('2d'), dpr = devicePixelRatio || 1, P = this.page;
@@ -286,7 +319,9 @@ export class Editor {
         this.animBelow = b; this.animAbove = a; this.animKey = key;
       }
       g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(this.animBelow, 0, 0); g.restore();
-      if (split.a1 >= split.a0) pageBase(g, P.layers.slice(split.a0, split.a1 + 1), false);
+      const st = this.liveStroke, LL = LS[split.a0];
+      if (liveEdit && st && st.L === LL && (LL.blend || 'source-over') === 'source-over') { this.drawLive(st, key, dpr); g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(this._liveC, 0, 0); g.restore(); }
+      else if (split.a1 >= split.a0) pageBase(g, P.layers.slice(split.a0, split.a1 + 1), false);
       if (split.a1 < LS.length - 1) { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(this.animAbove, 0, 0); g.restore(); }
     } else {
       this.animKey = null;
@@ -630,6 +665,7 @@ export class Editor {
     const s = new Stroke(b, target, { color, paper: paper === 'custom' ? 'sketch' : paper, layerCtx: workCtx || ctx, sampleSrc, heightCtx: direct ? this.heightCtx : this.strokeCtx, alphaLock: !!L.alphaLock, grainScale: Math.max(0.5, Math.min(this.page.w, this.page.h) / 1700) });
     this.stroking = true;
     const st = { s, L, sm: null, direct, name: b.name };
+    this.liveStroke = st;
     this.strokeMove(st, e);
     return st;
   }
@@ -667,7 +703,7 @@ export class Editor {
   }
   endStroke(st) {
     if (!st) return;
-    this.stroking = false; this.ropeView = null;
+    this.stroking = false; this.ropeView = null; this.liveStroke = null; this.liveSt = null;
     const { s, L } = st, b = this.preset;
     const ctx = this.layerCtx(L);
     if (st.direct) { s.finish(this.workCtx); this.flushWork(st, s.bbox); } else s.finish(ctx);
