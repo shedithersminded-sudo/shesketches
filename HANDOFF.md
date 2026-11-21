@@ -13,14 +13,14 @@ checked exports, local-first, honest limits.
 - Repo: https://github.com/shedithersminded-sudo/shesketches (branch `main`, public)
 - Live app: https://shedithersminded-sudo.github.io/shesketches/ (GitHub Pages from `main` /)
 - Local: `start.bat`, or launch config `shesketches` (python devserver.py, port 8800)
-- Self-test: http://localhost:8800/tests.html (37 checks, last run 37 passed)
+- Self-test: http://localhost:8801/tests.html via launch config `shesketches-test` (separate port = separate data, so the user's books on 8800 are never touched). 41 checks, last run 41 passed
 
 ## How we work here
 - After every change: run tests.html, then commit and push. Pages updates in about a minute.
 - Commit as shedithersminded-sudo with the GitHub noreply email.
 - GitHub web steps go in Brave (Claude in Chrome). The built-in browser pane is not signed in to GitHub.
-- The user often draws live in the preview tab. Test in a separate tab with throwaway books,
-  then delete them and put settings back (selected brush etc.).
+- The user often draws live in their own tab. Test on port 8801 (`shesketches-test`), which has its own empty storage.
+  The user can see the browser pane and may click into the test tab; tell them it is test data.
 - Tell the user to press Ctrl+R in their tab to load a new version. The current page saves first.
 - Screenshots the user sends are bug reports or style inspo. Fix what they show.
 - Copy in the app: plain short sentences, no em dashes, every setting gets a one-line help.
@@ -38,7 +38,8 @@ No build step. Vanilla JS ES modules. `three` is mapped with an import map in `i
 | `js/main.js` | Shelf, new book (16 types), book view (camera pad, free cam, flick, keys), Customize (Cover, Paper & inside, Book & turning, Desk & light, each with "Show me"), cover drawing, sticker tray, Record, Settings, guide |
 | `js/book3d.js` | three.js book: bending pages, page stacks, bindings, cover, band, ribbon, desk, lights, turning, `hitAt` raycast for sticker drops |
 | `js/editor.js` | Page editor: bottom dock, brush panel from PARAMS, brush maker, layers, history, select and move, quick menu, preview mode, cover mode |
-| `js/brushes.js` | 37 PRESETS and PARAMS. Engines: stamp, paint (RYB mixing grid), water, marker, splat, erase, blend. `mixPaint()` |
+| `js/brushes.js` | 75 PRESETS and PARAMS. 13 TIP_SHAPES (round, square, flat, bristle, fan, rake, chalk, sponge, triangle, diamond, star, heart, nib) for dry, wet, blend and erase. Drag param. Smooth blurred thick-paint relief. `mixPaint()` |
+| `js/colorwheel.js` | Hue ring + strength/lightness square, lighter/darker, matching and softer color ideas, hex/HSV math |
 | `js/render.js` | Artwork renderer, clipping, GIF / animated WEBP / video media |
 | `js/stickerfx.js` | Sticker looks at draw time: border, finishes, textures, puffy, wrinkles, wear, peel, tint, 11 presets |
 | `js/stickers.js` | Sticker factory (background removal, wand, outlines, gloss) and the makers screen |
@@ -61,10 +62,13 @@ No build step. Vanilla JS ES modules. `three` is mapped with an import map in `i
   gilded edges, endpapers, band, ribbon, 6 desks, light direction and warmth.
   Camera pad with 12 views, free camera (C, then WASD/QE), flick (F), keys list (K).
 - **Customize:** four tabs, each with "Show me". Draw your own cover in the full editor.
-- **Editor:** 37 brushes. Paints mix like real paint (blue + yellow = green). Blend tool with 6 blenders
+- **Editor:** 75 brushes in every section. Tip shapes for brushes, blenders and erasers. Drag setting (how far colors smear) in brush settings and the dock.
+  Double-click the page = quick menu (right button does nothing). Color wheel in the panel and as a popup (C or click the color chip).
+  Pick color with a loupe (I, or hold Alt), from everything or one layer, 1 to 11 px average, plus pick from screen and copy hex.
+  Zoom: scroll, 1/2/3 = 100/200/400% at cursor, 0 fit, hold Z + click or drag, zoom row in the quick menu. Paints mix like real paint (blue + yellow = green). Blend tool with 6 blenders
   plus smoothing. Brush maker with "My brushes" and .brush.json sharing. Layers with thumbnails, drag order,
   clip, protect transparent, lock, merge, fill. Undo, redo, history jump. Multi-select move, lock, delete.
-  Quick menu (right-click or Q). Alt+scroll size, Alt+Shift+scroll strength. Text, images, filters.
+  Quick menu (double-click or Q). Alt+scroll size, Alt+Shift+scroll strength. Text, images, filters.
 - **Stickers:** tray in the book view (T) and editor (K). Drag onto the 3D cover or a page, then
   "Edit it" or "Undo". Sticker look settings and presets in the Picture panel.
 - **Media:** GIFs, animated WEBP/PNG and short videos on pages. They play in the book and in videos.

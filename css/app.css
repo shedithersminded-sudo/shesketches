@@ -263,7 +263,7 @@ kbd { background: var(--bg2); border: 1px solid var(--line); border-bottom-width
 
 .place-pop { position: fixed; z-index: 300; transform: translate(-50%, -120%); display: flex; gap: 6px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; box-shadow: var(--shadow); font-size: 12px; animation: pop .25s; }
 
-/* quick menu (right-click) */
+/* quick menu (double-click or Q) */
 .quick-menu { position: fixed; z-index: 250; width: 300px; max-height: 86vh; overflow: auto; background: color-mix(in srgb, var(--panel) 96%, transparent); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 16px 50px rgba(0,0,0,.55); backdrop-filter: blur(10px); padding: 8px 10px 10px; animation: qpop .18s cubic-bezier(.2,1.4,.4,1); }
 @keyframes qpop { from { transform: scale(.85); opacity: 0; } }
 .qm-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 13px; }
@@ -275,7 +275,21 @@ kbd { background: var(--bg2); border: 1px solid var(--line); border-bottom-width
 .qs input { width: 100%; } .qs .qv { text-align: right; color: var(--ink); }
 .qm-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 8px 0 3px; }
 .qm-brushes { display: flex; flex-wrap: wrap; gap: 3px; } .qm-sw { display: flex; flex-wrap: wrap; gap: 4px; }
-.qm-tip { margin-top: 8px; }
+.qm-tip { margin-top: 8px; } .qm-tip .row.check { margin-bottom: 4px; color: var(--ink); }
+.qm-zoom { align-items: center; } .qm-zoom .ql { font-size: 11px; color: var(--muted); width: 36px; } .qm-zoom .qv { font-size: 11px; min-width: 38px; text-align: center; }
+.cpop { width: 270px; } .cpop .hex { width: 76px; flex: none; }
+/* color wheel */
+.cw { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 4px 0 8px; }
+.cw-canvas { touch-action: none; cursor: crosshair; }
+.cw-info { display: flex; align-items: center; gap: 8px; font-size: 12px; } .cw-now { width: 34px; height: 20px; border-radius: 5px; border: 1px solid rgba(0,0,0,.35); } .cw-hex { font-family: ui-monospace, monospace; color: var(--muted); }
+.cw-ideas { width: 100%; display: flex; flex-direction: column; gap: 4px; }
+.cw-row { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; } .cw-row .sw { width: 20px; height: 20px; }
+.cw-lbl { font-size: 10px; color: var(--muted); width: 82px; flex: none; }
+/* tip shape picker */
+.shape-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); gap: 4px; margin: 4px 0; }
+.shape-btn { height: 36px; padding: 0; border-radius: 7px; border: 1px solid var(--line); background: #2a2522; display: flex; align-items: center; justify-content: center; }
+.shape-btn.on { border-color: var(--accent2); box-shadow: 0 0 0 1px var(--accent2) inset; }
+.shape-btn:hover { transform: scale(1.08); }
 
 @media (max-width: 900px) {
   .newbook, .pmaker, .bmaker { grid-template-columns: 1fr; } .view-pad { transform: scale(.85); transform-origin: bottom right; }

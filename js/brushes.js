@@ -11,6 +11,37 @@ import { grainTile } from './paper.js';
 
 // ---------- what every setting means (used by the brush panel and the brush maker) ----------
 // engines: which engines use the setting
+export const TIP_SHAPES = { round: 'Round', square: 'Square', flat: 'Flat brush', bristle: 'Bristle hairs', fan: 'Fan brush', rake: 'Rake (spaced hairs)', chalk: 'Chalky stick', sponge: 'Sponge', triangle: 'Triangle', diamond: 'Diamond', star: 'Star', heart: 'Heart', nib: 'Pen nib' };
+// outlined tip shapes drawn from a path (the rest are built from hairs, chalk or a soft circle)
+const PATH_SHAPES = new Set(['square', 'triangle', 'diamond', 'star', 'heart', 'fan']);
+const HAIR_SHAPES = new Set(['bristle', 'fan', 'rake']);
+export function shapePath(g, shape, r) {
+  g.beginPath();
+  if (shape === 'square') g.roundRect(-r, -r, r * 2, r * 2, r * 0.1);
+  else if (shape === 'triangle') { g.moveTo(0, -r); g.lineTo(r * 0.95, r * 0.8); g.lineTo(-r * 0.95, r * 0.8); g.closePath(); }
+  else if (shape === 'diamond') { g.moveTo(0, -r); g.lineTo(r * 0.72, 0); g.lineTo(0, r); g.lineTo(-r * 0.72, 0); g.closePath(); }
+  else if (shape === 'star') { for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r; i ? g.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : g.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); } g.closePath(); }
+  else if (shape === 'heart') { g.moveTo(0, r * 0.95); g.bezierCurveTo(-r * 1.25, r * 0.05, -r * 0.75, -r * 1.05, 0, -r * 0.45); g.bezierCurveTo(r * 0.75, -r * 1.05, r * 1.25, r * 0.05, 0, r * 0.95); g.closePath(); }
+  else if (shape === 'fan') { const cy = r * 0.62; g.moveTo(0, cy); g.arc(0, cy, r * 1.3, -Math.PI / 2 - 0.85, -Math.PI / 2 + 0.85); g.closePath(); }
+  else g.arc(0, 0, r, 0, Math.PI * 2);
+}
+// a filled tip shape with a soft edge (hardness 1 = crisp)
+function fillShape(g, shape, r, hard) {
+  const blur = Math.max(0, (1 - hard) * r * 0.45);
+  g.save();
+  if (blur > 0.4) g.filter = `blur(${blur.toFixed(1)}px)`;
+  shapePath(g, shape, Math.max(r * 0.35, r - blur * 1.3)); g.fill();
+  g.restore();
+}
+// sponge: a soft blob full of holes
+function spongeHoles(g, r, rnd) {
+  g.save(); g.globalCompositeOperation = 'destination-out'; g.fillStyle = '#000';
+  const n = Math.round(10 + r * 1.2);
+  for (let i = 0; i < n; i++) { const a = rnd() * 6.283, rr = Math.sqrt(rnd()) * r, s = r * (0.05 + rnd() * 0.14); g.globalAlpha = 0.5 + rnd() * 0.5; g.beginPath(); g.arc(Math.cos(a) * rr, Math.sin(a) * rr, s, 0, 7); g.fill(); }
+  g.restore();
+}
+const seeded = s => () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+
 export const PARAMS = [
   { k: 'size', short: 'Size', g: 'Basics', label: 'Size', min: 1, max: 600, step: 0.5, unit: 'px', help: 'How wide the brush is, in page pixels.', engines: '*' },
   { k: 'opacity', short: 'Strength', g: 'Basics', label: 'Strength', min: 0.02, max: 1, step: 0.01, pct: 1, help: 'How strong the brush can get. Lower it to work in light, see-through layers.', engines: '*' },
@@ -18,7 +49,7 @@ export const PARAMS = [
   { k: 'min', short: 'Light press', g: 'Pen pressure', label: 'Lightest press size', min: 0, max: 1, step: 0.01, pct: 1, help: 'How big the brush is when you press very lightly, compared to its full size. 100% means pressure does not change the size.', engines: '*' },
   { k: 'pOpacity', short: 'Press = darker', g: 'Pen pressure', label: 'Pressure to strength', min: 0, max: 1, step: 0.01, pct: 1, help: 'How much pressing harder makes the mark darker or more opaque.', engines: '*' },
   { k: 'smooth', short: 'Steady line', g: 'Pen pressure', label: 'Smoothing', min: 0, max: 0.95, step: 0.01, pct: 1, help: 'Steadies shaky lines. Higher is smoother but trails a little behind your hand.', engines: '*' },
-  { k: 'tip', g: 'Tip', label: 'Tip shape', type: 'select', options: { round: 'Round', bristle: 'Bristle hairs', flat: 'Flat brush', chalk: 'Chalky stick', nib: 'Pen nib' }, help: 'The shape of the brush. Bristles leave hair streaks, flat brushes leave wide strokes that turn with your hand.', engines: ['paint', 'stamp', 'erase'] },
+  { k: 'tip', g: 'Tip', label: 'Tip shape', type: 'select', options: TIP_SHAPES, help: 'The shape of the brush. Works for drawing brushes, blenders and erasers. Bristles leave hair streaks, flat and square tips make wide marks that can turn with your hand, sponge gives a dotty texture.', engines: ['paint', 'stamp', 'erase'] },
   { k: 'hard', short: 'Hardness', g: 'Tip', label: 'Hardness', min: 0, max: 1, step: 0.01, pct: 1, help: 'Soft edges fade out, hard edges are crisp.', engines: ['stamp', 'paint', 'water', 'marker', 'erase'] },
   { k: 'spacing', short: 'Spacing', g: 'Tip', label: 'Spacing', min: 0.02, max: 1, step: 0.01, pct: 1, help: 'How far apart each touch of the tip is along the line. Small spacing is smooth, big spacing makes dotted lines.', engines: ['stamp', 'paint', 'water', 'marker', 'erase'] },
   { k: 'round', short: 'Roundness', g: 'Tip', label: 'Roundness', min: 0.08, max: 1, step: 0.01, pct: 1, help: 'Squash the tip into an oval, like a chisel marker or a calligraphy nib.', engines: ['stamp', 'paint', 'marker', 'erase'] },
@@ -33,6 +64,7 @@ export const PARAMS = [
   { k: 'dust', short: 'Dust', g: 'Texture', label: 'Dust', min: 0, max: 1, step: 0.01, pct: 1, help: 'Little specks fall around the line, like charcoal or soft pastel.', engines: ['stamp'] },
   { k: 'load', short: 'Paint', g: 'Paint and mixing', label: 'Paint on brush', min: 0, max: 1, step: 0.01, pct: 1, help: 'How much fresh color the brush takes on with every touch. At 0 the brush adds no new color and only blends what is already there.', engines: ['paint'] },
   { k: 'pickup', short: 'Mix', g: 'Paint and mixing', label: 'Mix (pick up and blend)', min: 0, max: 1, step: 0.01, pct: 1, help: 'How much the brush mixes with the colors under it. 0 lays clean color on top. High values drag, blend and mix colors together like wet paint.', engines: ['paint'] },
+  { k: 'drag', short: 'Drag', g: 'Paint and mixing', label: 'Drag (how far colors smear)', min: 0, max: 1, step: 0.01, pct: 1, help: 'How far the brush carries colors along the stroke. Low blends in place. High pulls colors a long way, like a finger through wet paint.', engines: ['paint'] },
   { k: 'wet', short: 'Water', g: 'Paint and mixing', label: 'Water', min: 0, max: 1, step: 0.01, pct: 1, help: 'Thins the paint with water so it goes on see-through and soft.', engines: ['paint'] },
   { k: 'lift', short: 'Lift', g: 'Paint and mixing', label: 'Lift paint off', min: 0, max: 1, step: 0.01, pct: 1, help: 'Takes paint off the page as you brush, like a damp brush or a paper towel.', engines: ['paint'] },
   { k: 'soften', short: 'Soften', g: 'Paint and mixing', label: 'Soften', min: 0, max: 1, step: 0.01, pct: 1, help: 'Blurs the colors the brush carries, for smooth soft blends.', engines: ['paint'] },
@@ -59,6 +91,14 @@ export const PRESETS = [
   { id: 'soft-pastel', kind: D, name: 'Soft pastel', tool: 'pastel', engine: 'paint', tip: 'chalk', size: 30, min: 0.6, opacity: 1, pOpacity: 0.5, flow: 0.7, hard: 0.7, spacing: 0.06, grain: 0.85, wax: 0.3, load: 0.85, pickup: 0.18, smooth: 0.2, follow: true, round: 0.7, color: '#e7a3b6', desc: 'Chalky color that catches the paper and blends into colors under it.' },
   { id: 'pastel', kind: D, name: 'Oil pastel', tool: 'pastel', engine: 'paint', tip: 'chalk', size: 28, min: 0.6, opacity: 1, pOpacity: 0.4, flow: 0.9, hard: 0.85, spacing: 0.05, grain: 0.75, wax: 1, load: 0.6, pickup: 0.4, smooth: 0.2, follow: true, round: 0.75, color: '#ef5a7a', desc: 'Creamy, waxy color. Go over another color and they smear together.' },
   { id: 'crayon', kind: D, name: 'Wax crayon', tool: 'pastel', engine: 'stamp', size: 16, min: 0.6, opacity: 1, pOpacity: 0.5, flow: 0.7, hard: 0.9, spacing: 0.07, grain: 1, jitter: 0.2, wax: 0.7, smooth: 0.2, desc: 'Bumpy wax that skips over the paper texture.' },
+  { id: 'mech-pencil', kind: D, name: 'Mechanical pencil', tool: 'pencil', engine: 'stamp', size: 3, min: 0.8, opacity: 0.9, pOpacity: 0.6, flow: 0.45, hard: 0.85, spacing: 0.1, grain: 0.7, jitter: 0.05, smooth: 0.45, color: '#3a3a3c', desc: 'A thin, even line that never gets thicker. Good for neat linework and small details.' },
+  { id: 'pencil-4b', kind: D, name: 'Sketching pencil 4B', tool: 'pencil', engine: 'stamp', size: 9, min: 0.45, opacity: 0.95, pOpacity: 0.75, flow: 0.4, hard: 0.55, spacing: 0.1, grain: 0.9, jitter: 0.2, smooth: 0.3, color: '#29292b', desc: 'Soft, dark and loose. Tilt it with light pressure for shading.' },
+  { id: 'graphite-stick', kind: D, name: 'Graphite stick', tool: 'pencil', engine: 'stamp', tip: 'flat', size: 30, min: 0.5, opacity: 0.9, pOpacity: 0.7, flow: 0.3, hard: 0.6, spacing: 0.06, round: 0.3, follow: true, grain: 0.95, jitter: 0.1, smooth: 0.3, color: '#3a3a3c', desc: 'A wide block of graphite for big, even shading with the paper grain showing.' },
+  { id: 'vine-charcoal', kind: D, name: 'Vine charcoal', tool: 'charcoal', engine: 'stamp', size: 18, min: 0.4, opacity: 0.8, pOpacity: 0.6, flow: 0.28, hard: 0.3, spacing: 0.08, grain: 1, jitter: 0.3, scatter: 0.4, dust: 0.3, smooth: 0.25, color: '#2a2726', desc: 'Light, soft gray charcoal. Easy to smudge and erase, great for first sketches.' },
+  { id: 'compressed-charcoal', kind: D, name: 'Compressed charcoal', tool: 'charcoal', engine: 'stamp', tip: 'square', size: 22, min: 0.5, opacity: 1, pOpacity: 0.5, flow: 0.7, hard: 0.55, spacing: 0.06, grain: 0.75, wax: 0.6, jitter: 0.15, dust: 0.4, smooth: 0.25, color: '#0c0b0b', desc: 'Very dark, dense black that fills more of the paper when you press.' },
+  { id: 'conte', kind: D, name: 'Conte crayon', tool: 'pastel', engine: 'stamp', tip: 'square', size: 20, min: 0.5, opacity: 1, pOpacity: 0.55, flow: 0.55, hard: 0.6, spacing: 0.07, grain: 0.85, wax: 0.5, jitter: 0.1, smooth: 0.25, color: '#7a3b24', desc: 'A square stick in classic earth colors. Use the corner for lines, the side for tone.' },
+  { id: 'chalk', kind: D, name: 'Chalk', tool: 'pastel', engine: 'stamp', tip: 'sponge', size: 24, min: 0.5, opacity: 1, pOpacity: 0.5, flow: 0.55, hard: 0.5, spacing: 0.07, grain: 1, jitter: 0.25, scatter: 0.3, dust: 0.6, smooth: 0.2, color: '#f4f1ea', desc: 'Dry, broken chalk marks. Shows up best on dark or toned paper.' },
+  { id: 'pastel-pencil', kind: D, name: 'Pastel pencil', tool: 'pencil', engine: 'paint', tip: 'chalk', size: 10, min: 0.5, opacity: 1, pOpacity: 0.5, flow: 0.7, hard: 0.7, spacing: 0.06, grain: 0.85, wax: 0.2, load: 0.8, pickup: 0.15, smooth: 0.3, color: '#c86aa0', desc: 'Pastel in pencil form: soft, chalky color you can blend, but with control for details.' },
   // ---- ink
   { id: 'ink-pen', kind: D, name: 'Ink pen', tool: 'pen', engine: 'stamp', size: 6, min: 0.25, opacity: 1, flow: 1, hard: 0.95, spacing: 0.05, grain: 0, smooth: 0.55, color: '#101012', desc: 'Smooth ink. Lines get thinner when you press lightly.' },
   { id: 'fineliner', kind: D, name: 'Fineliner', tool: 'fineliner', engine: 'stamp', size: 3.5, min: 1, opacity: 1, flow: 1, hard: 1, spacing: 0.05, grain: 0, smooth: 0.6, color: '#101012', desc: 'Even, clean lines that never change width.' },
@@ -66,6 +106,12 @@ export const PRESETS = [
   { id: 'dip-pen', kind: D, name: 'Calligraphy nib', tool: 'nib', engine: 'stamp', tip: 'nib', size: 16, min: 0.6, opacity: 1, flow: 1, hard: 0.95, spacing: 0.03, round: 0.18, angle: 40, grain: 0.05, smooth: 0.55, color: '#1a1520', desc: 'A slanted nib: strokes are thick one way and thin the other.' },
   { id: 'gel', kind: D, name: 'Gel pen', tool: 'fineliner', engine: 'stamp', size: 5, min: 0.85, opacity: 1, flow: 1, hard: 0.95, spacing: 0.05, grain: 0.1, smooth: 0.5, color: '#f4f1ea', desc: 'Opaque gel ink, great in white on dark paper.' },
   { id: 'sumi', kind: D, name: 'Ink brush (sumi)', tool: 'inkbrush', engine: 'paint', tip: 'bristle', size: 40, min: 0.12, opacity: 1, pOpacity: 0.3, flow: 1, bristles: 30, load: 0.9, pickup: 0.08, dry: 0.55, hard: 0.6, spacing: 0.04, follow: true, smooth: 0.35, color: '#0d0d0e', desc: 'A soft ink brush with hair streaks that run dry at the end of a stroke.' },
+  { id: 'ballpoint', kind: D, name: 'Ballpoint pen', tool: 'pen', engine: 'stamp', size: 2.6, min: 0.6, opacity: 0.85, pOpacity: 0.75, flow: 0.6, hard: 0.9, spacing: 0.08, grain: 0.35, smooth: 0.4, color: '#1f2f6b', desc: 'Everyday blue ballpoint. Light pressure gives faint, skipping lines, like the real thing.' },
+  { id: 'tech-pen', kind: D, name: 'Technical pen', tool: 'fineliner', engine: 'stamp', size: 2, min: 1, opacity: 1, flow: 1, hard: 1, spacing: 0.04, grain: 0, smooth: 0.7, color: '#0b0b0c', desc: 'Perfectly crisp, even black line for clean inking.' },
+  { id: 'felt-tip', kind: D, name: 'Felt tip pen', tool: 'fineliner', engine: 'marker', size: 6, min: 0.85, opacity: 0.9, flow: 1, hard: 0.85, spacing: 0.05, smooth: 0.45, color: '#202024', desc: 'A bold, slightly soft line that gets a bit darker where lines cross.' },
+  { id: 'stipple-pen', kind: D, name: 'Stippling pen', tool: 'fineliner', engine: 'stamp', size: 4, min: 0.6, opacity: 1, flow: 1, hard: 0.95, spacing: 1, scatter: 1.4, jitter: 0.4, grain: 0, smooth: 0.1, color: '#101012', desc: 'Drops dots as you move, for stippled shading. Go over an area more to make it darker.' },
+  { id: 'crowquill', kind: D, name: 'Crowquill nib', tool: 'nib', engine: 'stamp', size: 6, min: 0.15, opacity: 1, pOpacity: 0.2, flow: 1, hard: 0.95, spacing: 0.03, grain: 0.05, smooth: 0.5, color: '#121014', desc: 'A springy fine nib. Press for thick, lift for hairline. Great for comics.' },
+  { id: 'dry-ink', kind: D, name: 'Dry ink brush', tool: 'inkbrush', engine: 'paint', tip: 'rake', size: 34, min: 0.3, opacity: 1, pOpacity: 0.3, flow: 1, bristles: 30, load: 0.8, pickup: 0.05, dry: 1.4, hard: 0.6, spacing: 0.04, follow: true, grain: 0.5, smooth: 0.3, color: '#0d0d0e', desc: 'Split, scratchy ink strokes with gaps between the hairs.' },
   // ---- paint
   { id: 'oil', kind: D, name: 'Oil brush', tool: 'brush', engine: 'paint', tip: 'bristle', size: 38, min: 0.5, opacity: 1, pOpacity: 0.3, flow: 1, bristles: 36, load: 0.42, pickup: 0.45, dry: 0.15, impasto: 0.2, hard: 0.72, spacing: 0.04, follow: true, smooth: 0.3, desc: 'Buttery oil paint. It drags and mixes with wet colors under it.' },
   { id: 'impasto', kind: D, name: 'Impasto oil', tool: 'knife', engine: 'paint', tip: 'bristle', size: 70, min: 0.6, opacity: 1, pOpacity: 0.2, flow: 1, bristles: 44, load: 0.45, pickup: 0.35, dry: 0.08, impasto: 1, hard: 0.7, spacing: 0.035, follow: true, smooth: 0.3, color: '#5b6a3c', desc: 'Thick paint with raised ridges and real light and shadow.' },
@@ -73,11 +119,26 @@ export const PRESETS = [
   { id: 'acrylic', kind: D, name: 'Acrylic brush', tool: 'flat', engine: 'paint', tip: 'bristle', size: 34, min: 0.5, opacity: 1, pOpacity: 0.3, flow: 1, bristles: 30, load: 0.65, pickup: 0.12, dry: 0.3, hard: 0.6, spacing: 0.04, round: 0.45, follow: true, smooth: 0.3, desc: 'Bold, opaque color with light brush marks.' },
   { id: 'drybrush', kind: D, name: 'Dry brush', tool: 'brush', engine: 'paint', tip: 'bristle', size: 46, min: 0.4, opacity: 1, pOpacity: 0.4, flow: 1, bristles: 26, load: 0.5, pickup: 0.05, dry: 1.2, grain: 0.5, hard: 0.5, spacing: 0.04, follow: true, smooth: 0.3, desc: 'Scratchy streaks that catch the paper texture.' },
   { id: 'gouache', kind: D, name: 'Gouache', tool: 'brush', engine: 'paint', tip: 'round', size: 34, min: 0.5, opacity: 1, pOpacity: 0.4, flow: 0.9, load: 0.5, pickup: 0.32, hard: 0.55, spacing: 0.05, grain: 0.15, smooth: 0.35, desc: 'Flat, matte, opaque color that blends while wet.' },
+  { id: 'filbert', kind: D, name: 'Filbert oil brush', tool: 'brush', engine: 'paint', tip: 'bristle', size: 36, min: 0.45, opacity: 1, pOpacity: 0.3, flow: 1, bristles: 40, load: 0.5, pickup: 0.4, drag: 0.55, dry: 0.12, impasto: 0.35, hard: 0.75, spacing: 0.04, round: 0.7, follow: true, smooth: 0.35, desc: 'A rounded flat brush. Soft edges and smooth blends for skin, clouds and petals.' },
+  { id: 'smooth-oil', kind: D, name: 'Smooth oil (no texture)', tool: 'brush', engine: 'paint', tip: 'round', size: 36, min: 0.5, opacity: 1, pOpacity: 0.3, flow: 1, load: 0.5, pickup: 0.5, drag: 0.6, soften: 0.35, hard: 0.6, spacing: 0.04, smooth: 0.35, desc: 'Silky oil paint with no brush marks. Blends really smooth.' },
+  { id: 'liner', kind: D, name: 'Detail liner brush', tool: 'brush', engine: 'paint', tip: 'round', size: 7, min: 0.2, opacity: 1, pOpacity: 0.3, flow: 1, load: 0.85, pickup: 0.1, hard: 0.75, spacing: 0.04, smooth: 0.55, desc: 'A long thin brush for fine lines, hair, grass and signatures.' },
+  { id: 'fan', kind: D, name: 'Fan brush', tool: 'flat', engine: 'paint', tip: 'fan', size: 60, min: 0.6, opacity: 1, pOpacity: 0.4, flow: 1, bristles: 34, load: 0.45, pickup: 0.3, dry: 0.5, hard: 0.6, spacing: 0.04, follow: true, smooth: 0.3, desc: 'Spread hairs for grass, leaves, fur and soft feathery texture.' },
+  { id: 'rake', kind: D, name: 'Rake brush', tool: 'flat', engine: 'paint', tip: 'rake', size: 44, min: 0.6, opacity: 1, pOpacity: 0.3, flow: 1, bristles: 30, load: 0.6, pickup: 0.2, dry: 0.3, hard: 0.7, spacing: 0.04, follow: true, smooth: 0.3, desc: 'Separate lines in one stroke. Hair, wood grain and fur in one go.' },
+  { id: 'sponge', kind: D, name: 'Sponge', tool: 'brush', engine: 'paint', tip: 'sponge', size: 70, min: 0.6, opacity: 1, pOpacity: 0.4, flow: 0.9, load: 0.55, pickup: 0.2, hard: 0.6, spacing: 0.25, jitter: 0, grain: 0.2, smooth: 0.2, desc: 'Dab paint on with a sponge for foliage, rock and rough textures.' },
+  { id: 'glaze-oil', kind: D, name: 'Oil glaze', tool: 'brush', engine: 'paint', tip: 'round', size: 60, min: 0.6, opacity: 0.45, pOpacity: 0.3, flow: 0.8, load: 0.5, pickup: 0.25, soften: 0.6, hard: 0.2, spacing: 0.04, blend: 'multiply', smooth: 0.35, desc: 'Thin, see-through oil to tint and deepen colors already there.' },
+  { id: 'heavy-knife', kind: D, name: 'Heavy knife', tool: 'knife', engine: 'paint', tip: 'square', size: 60, min: 0.8, opacity: 1, pOpacity: 0.2, flow: 1, load: 0.55, pickup: 0.45, impasto: 1.2, hard: 0.9, spacing: 0.03, round: 0.4, follow: true, smooth: 0.4, color: '#c23b3b', desc: 'Thick slabs of paint with smooth raised edges, like heavy body paint off a knife.' },
   { id: 'wet-wash', kind: D, name: 'Watercolor wet-in-wet', tool: 'brush', engine: 'paint', tip: 'round', size: 60, min: 0.4, opacity: 0.8, pOpacity: 0.5, flow: 0.5, load: 0.3, pickup: 0.4, wet: 0.65, soften: 0.5, hard: 0.15, spacing: 0.05, grain: 0.35, smooth: 0.35, blend: 'multiply', color: '#3b6ea8', desc: 'Soft wet color that bleeds into other wet colors.' },
   { id: 'watercolor', kind: D, name: 'Watercolor glaze', tool: 'brush', engine: 'water', size: 50, min: 0.3, opacity: 0.55, flow: 0.18, hard: 0.15, spacing: 0.08, grain: 0.5, wetEdge: 0.7, smooth: 0.35, blend: 'multiply', color: '#3b6ea8', desc: 'See-through wash with dark dried edges. Layers glaze like real watercolor.' },
   { id: 'marker', kind: D, name: 'Marker', tool: 'marker', engine: 'marker', size: 24, min: 1, opacity: 0.6, flow: 1, hard: 0.9, spacing: 0.05, smooth: 0.4, blend: 'multiply', color: '#c23b3b', desc: 'Alcohol marker. Even color per stroke; go over it again to darken.' },
   { id: 'chisel', kind: D, name: 'Chisel marker', tool: 'marker', engine: 'marker', size: 30, min: 1, opacity: 0.6, flow: 1, hard: 0.95, spacing: 0.04, round: 0.3, angle: 30, smooth: 0.4, blend: 'multiply', color: '#3b8a6a', desc: 'Wide flat marker tip for blocking in color and lettering.' },
   { id: 'highlighter', kind: D, name: 'Highlighter', tool: 'marker', engine: 'marker', size: 34, min: 1, opacity: 0.45, flow: 1, hard: 1, spacing: 0.05, round: 0.4, angle: 0, smooth: 0.5, blend: 'multiply', color: '#f2e14c', desc: 'See-through bright color.' },
+  { id: 'brush-marker', kind: D, name: 'Brush marker', tool: 'marker', engine: 'marker', size: 20, min: 0.25, opacity: 0.55, pOpacity: 0, flow: 1, hard: 0.75, spacing: 0.04, smooth: 0.45, blend: 'multiply', color: '#6b4a8a', desc: 'A flexible marker tip: press for wide, lift for thin. Layers like alcohol markers.' },
+  { id: 'paint-marker', kind: D, name: 'Paint marker', tool: 'marker', engine: 'marker', size: 12, min: 1, opacity: 1, flow: 1, hard: 0.95, spacing: 0.04, smooth: 0.45, color: '#f4f1ea', desc: 'Solid, opaque paint. Covers dark colors, even white on black.' },
+  { id: 'wc-round', kind: D, name: 'Watercolor round', tool: 'brush', engine: 'water', size: 30, min: 0.25, opacity: 0.6, flow: 0.25, hard: 0.3, spacing: 0.06, grain: 0.45, wetEdge: 0.6, smooth: 0.4, blend: 'multiply', color: '#b3211e', desc: 'A pointed round brush for washes and details. Press for wide, lift for a fine tip.' },
+  { id: 'wc-dry', kind: D, name: 'Dry watercolor', tool: 'brush', engine: 'water', size: 44, min: 0.5, opacity: 0.6, flow: 0.3, hard: 0.4, spacing: 0.08, grain: 1, wetEdge: 0.3, smooth: 0.3, blend: 'multiply', color: '#2e8a7a', desc: 'Watercolor on a dry brush: it catches only the tops of the paper for sparkly texture.' },
+  { id: 'ink-wash', kind: D, name: 'Ink wash', tool: 'inkbrush', engine: 'water', size: 60, min: 0.4, opacity: 0.45, flow: 0.2, hard: 0.15, spacing: 0.06, grain: 0.4, wetEdge: 0.8, smooth: 0.35, blend: 'multiply', color: '#2a2a2c', desc: 'Watered down black ink for gray shading with soft pooled edges.' },
+  { id: 'spray', kind: D, name: 'Spray paint', tool: 'spray', engine: 'stamp', tip: 'sponge', size: 90, min: 0.6, opacity: 0.9, flow: 0.08, hard: 0.2, spacing: 0.05, scatter: 0.5, grain: 0, smooth: 0.2, color: '#e0533d', desc: 'A grainy spray can mist. Build it up slowly.' },
+  { id: 'star-stamp', kind: D, name: 'Star stamp', tool: 'marker', engine: 'stamp', tip: 'star', size: 30, min: 0.6, opacity: 1, flow: 1, hard: 0.95, spacing: 1, jitter: 0.4, scatter: 1, smooth: 0.1, color: '#f2c94c', desc: 'Scatters little stars as you draw. Try the heart or other shapes in Tip shape.' },
   { id: 'airbrush', kind: D, name: 'Airbrush', tool: 'airbrush', engine: 'stamp', size: 80, min: 0.4, opacity: 0.8, flow: 0.04, hard: 0, spacing: 0.05, grain: 0, smooth: 0.3, desc: 'Very soft spray for smooth shading and glows.' },
   { id: 'splatter', kind: D, name: 'Splatter', tool: 'spray', engine: 'splat', size: 60, min: 0.5, opacity: 1, flow: 1, smooth: 0.1, desc: 'Flicked paint drops.' },
   // ---- blending
@@ -88,12 +149,21 @@ export const PRESETS = [
   { id: 'water-brush', kind: B, name: 'Water brush', tool: 'waterbrush', engine: 'paint', tip: 'round', size: 50, min: 0.5, opacity: 1, pOpacity: 0.4, flow: 0.8, load: 0, pickup: 0.45, wet: 0.45, lift: 0.1, soften: 0.6, hard: 0.2, spacing: 0.05, grain: 0.3, smooth: 0.35, desc: 'Clean water. Melts watercolor pencil and paint, softens edges and lifts a little color.' },
   { id: 'stump', kind: B, name: 'Blending stump', tool: 'stump', engine: 'paint', tip: 'chalk', size: 22, min: 0.6, opacity: 1, pOpacity: 0.5, flow: 1, load: 0, pickup: 0.7, soften: 0.2, hard: 0.4, spacing: 0.05, grain: 0.55, smooth: 0.3, desc: 'Rolled paper for blending pencil, charcoal and pastel without losing the paper texture.' },
   { id: 'knife-blend', kind: B, name: 'Knife blend', tool: 'knife', engine: 'paint', tip: 'flat', size: 70, min: 0.8, opacity: 1, pOpacity: 0.2, flow: 1, load: 0, pickup: 0.8, impasto: 0.4, hard: 0.95, spacing: 0.03, round: 0.22, follow: true, smooth: 0.4, desc: 'Drags a flat knife through wet paint and leaves ridges.' },
+  { id: 'square-blend', kind: B, name: 'Square blender', tool: 'flat', engine: 'paint', tip: 'square', size: 50, min: 0.7, opacity: 1, pOpacity: 0.4, flow: 1, load: 0, pickup: 0.6, drag: 0.55, soften: 0.3, hard: 0.7, spacing: 0.04, smooth: 0.35, desc: 'Blends with straight clean edges. Good for hard light, buildings and graphic shading.' },
+  { id: 'long-drag', kind: B, name: 'Long drag smudge', tool: 'finger', engine: 'paint', tip: 'round', size: 40, min: 0.6, opacity: 1, pOpacity: 0.5, flow: 1, load: 0, pickup: 0.7, drag: 0.92, soften: 0.25, hard: 0.35, spacing: 0.04, smooth: 0.35, desc: 'Pulls colors far along your stroke, like dragging a wet finger through paint.' },
+  { id: 'fan-blend', kind: B, name: 'Fan blender', tool: 'flat', engine: 'paint', tip: 'fan', size: 60, min: 0.7, opacity: 1, pOpacity: 0.4, flow: 1, bristles: 36, load: 0, pickup: 0.55, hard: 0.5, spacing: 0.04, follow: true, smooth: 0.35, desc: 'Feathers soft hairy blends. Great for skies and soft fur.' },
+  { id: 'sponge-blend', kind: B, name: 'Sponge blender', tool: 'brush', engine: 'paint', tip: 'sponge', size: 60, min: 0.7, opacity: 1, pOpacity: 0.4, flow: 1, load: 0, pickup: 0.5, hard: 0.5, spacing: 0.12, grain: 0.2, smooth: 0.25, desc: 'Dabs colors together with a dotty sponge texture.' },
+  { id: 'tortillon', kind: B, name: 'Tortillon (small stump)', tool: 'stump', engine: 'paint', tip: 'round', size: 10, min: 0.5, opacity: 1, pOpacity: 0.5, flow: 1, load: 0, pickup: 0.65, soften: 0.2, hard: 0.5, spacing: 0.05, grain: 0.5, smooth: 0.4, desc: 'A tiny pointed stump for blending small details in pencil and charcoal.' },
+  { id: 'wet-blend', kind: B, name: 'Wet blender', tool: 'waterbrush', engine: 'paint', tip: 'round', size: 60, min: 0.6, opacity: 1, pOpacity: 0.4, flow: 0.9, load: 0, pickup: 0.55, drag: 0.7, wet: 0.3, soften: 0.75, hard: 0.15, spacing: 0.04, smooth: 0.4, desc: 'A damp soft brush: colors melt and run together like wet paint.' },
   // ---- erasers
   { id: 'eraser', kind: 'erase', name: 'Eraser', tool: 'eraser', engine: 'erase', size: 30, min: 0.6, opacity: 1, flow: 1, hard: 0.85, spacing: 0.1, smooth: 0.3, desc: 'Removes what is on this layer.' },
   { id: 'kneaded', kind: 'erase', name: 'Soft eraser', tool: 'eraser', engine: 'erase', size: 60, min: 0.5, opacity: 0.5, flow: 0.25, hard: 0.1, spacing: 0.08, grain: 0.6, smooth: 0.3, desc: 'Lifts a little at a time, like a kneaded eraser. Good for highlights.' },
+  { id: 'block-eraser', kind: 'erase', name: 'Block eraser', tool: 'eraser', engine: 'erase', tip: 'square', size: 34, min: 0.8, opacity: 1, flow: 1, hard: 0.9, spacing: 0.08, smooth: 0.3, desc: 'A square eraser with straight edges. Clean up edges and corners.' },
+  { id: 'pencil-eraser', kind: 'erase', name: 'Pencil eraser', tool: 'eraser', engine: 'erase', size: 8, min: 0.7, opacity: 1, flow: 1, hard: 0.85, spacing: 0.08, smooth: 0.45, desc: 'A small eraser for details and highlights.' },
+  { id: 'texture-eraser', kind: 'erase', name: 'Texture eraser', tool: 'eraser', engine: 'erase', tip: 'sponge', size: 50, min: 0.7, opacity: 0.8, flow: 0.6, hard: 0.6, spacing: 0.15, grain: 0.6, smooth: 0.25, desc: 'Lifts color in a broken, textured way, like a dry sponge.' },
 ];
 // defaults any brush falls back on
-export const DEFAULTS = { kind: D, tool: 'brush', engine: 'stamp', tip: 'round', size: 20, min: 0.5, opacity: 1, pOpacity: 0.5, flow: 0.8, hard: 0.6, spacing: 0.08, round: 1, angle: 0, follow: false, bristles: 24, dry: 0, jitter: 0, scatter: 0, grain: 0, wax: 0, dust: 0, load: 0.6, pickup: 0.2, wet: 0, lift: 0, soften: 0, mixMode: 'paint', sampleAll: true, impasto: 0, wetEdge: 0.7, blend: 'source-over', smooth: 0.3 };
+export const DEFAULTS = { kind: D, tool: 'brush', engine: 'stamp', tip: 'round', size: 20, min: 0.5, opacity: 1, pOpacity: 0.5, flow: 0.8, hard: 0.6, spacing: 0.08, round: 1, angle: 0, follow: false, bristles: 24, dry: 0, jitter: 0, scatter: 0, grain: 0, wax: 0, dust: 0, load: 0.6, pickup: 0.2, drag: 0.5, wet: 0, lift: 0, soften: 0, mixMode: 'paint', sampleAll: true, impasto: 0, wetEdge: 0.7, blend: 'source-over', smooth: 0.3 };
 export const fullBrush = p => ({ ...DEFAULTS, ...p });
 
 const noise1 = x => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f), h = n => { let v = Math.imul(n | 0, 374761393) ^ 0x5bd1e995; v = Math.imul(v ^ (v >>> 13), 1274126177); return ((v ^ (v >>> 16)) >>> 0) / 4294967296; }; return h(i) + (h(i + 1) - h(i)) * u; };
@@ -132,21 +202,36 @@ export function mixPaint(a, b, t) {
 }
 export function mixHex(a, b, t) { const A = rgb(a), B = rgb(b); return toHex(A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t); }
 
-// cached round / oval tip
+// cached tip: round / oval by default, or any shape from TIP_SHAPES
 const tipCache = new Map();
-function tip(d, hard, color, round = 1, angle = 0) {
+function tip(d, hard, color, round = 1, angle = 0, shape = 'round', variant = 0) {
   d = Math.max(1, Math.round(d * 2) / 2);
-  const key = d + '|' + hard.toFixed(2) + '|' + color + '|' + round.toFixed(2) + '|' + Math.round(angle);
+  const sh = PATH_SHAPES.has(shape) || shape === 'sponge' || shape === 'rake' || shape === 'flat' ? shape : 'round';
+  const key = d + '|' + hard.toFixed(2) + '|' + color + '|' + round.toFixed(2) + '|' + Math.round(angle) + '|' + sh + '|' + variant;
   let c = tipCache.get(key);
   if (c) return c;
-  c = mk(d + 2, d + 2); const g = c.getContext('2d'), r = d / 2, cx = c.width / 2;
+  const pad = sh === 'round' ? 2 : Math.ceil(d * 0.45) + 2;
+  c = mk(d + pad, d + pad); const g = c.getContext('2d'), r = d / 2, cx = c.width / 2;
   const [R, G, B] = rgb(color);
-  g.translate(cx, cx); g.rotate(angle * Math.PI / 180); g.scale(1, Math.max(0.05, round));
-  const gr = g.createRadialGradient(0, 0, 0, 0, 0, r);
-  gr.addColorStop(0, `rgba(${R},${G},${B},1)`);
-  gr.addColorStop(Math.min(0.99, Math.max(0.01, hard)), `rgba(${R},${G},${B},1)`);
-  gr.addColorStop(1, `rgba(${R},${G},${B},0)`);
-  g.fillStyle = gr; g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill();
+  g.translate(cx, cx); g.rotate(angle * Math.PI / 180);
+  if (sh === 'round' || sh === 'sponge') {
+    g.save(); g.scale(1, Math.max(0.05, round));
+    const gr = g.createRadialGradient(0, 0, 0, 0, 0, r);
+    gr.addColorStop(0, `rgba(${R},${G},${B},1)`);
+    gr.addColorStop(Math.min(0.99, Math.max(0.01, hard)), `rgba(${R},${G},${B},1)`);
+    gr.addColorStop(1, `rgba(${R},${G},${B},0)`);
+    g.fillStyle = gr; g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill(); g.restore();
+    if (sh === 'sponge') spongeHoles(g, r, seeded(1 + variant * 7919));
+  } else if (sh === 'rake') {
+    g.save(); g.scale(1, Math.max(0.05, round)); g.fillStyle = `rgb(${R},${G},${B})`;
+    const n = Math.max(3, Math.min(9, Math.round(d / 5)));
+    for (let i = 0; i < n; i++) { const x = -r + (i + 0.5) * (2 * r / n); g.beginPath(); g.arc(x, 0, Math.max(0.5, r / n * 0.55), 0, 7); g.fill(); }
+    g.restore();
+  } else {
+    g.save(); g.scale(sh === 'flat' ? 1 : 1, Math.max(0.05, sh === 'flat' ? Math.min(round, 0.3) : round));
+    g.fillStyle = `rgb(${R},${G},${B})`;
+    fillShape(g, sh === 'flat' ? 'square' : sh, r, hard); g.restore();
+  }
   tipCache.set(key, c);
   if (tipCache.size > 400) tipCache.delete(tipCache.keys().next().value);
   return c;
@@ -182,6 +267,7 @@ export class Stroke {
     const L = this.last, dx = pt.x - L.x, dy = pt.y - L.y, d = Math.hypot(dx, dy);
     if (d < 0.01) return;
     const a = Math.atan2(dy, dx);
+    const prevDir = this.dir;
     if (this.dir == null) this.dir = a;
     else { let da = a - this.dir; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI; this.dir += da * Math.min(1, d / Math.max(4, b.size * 0.25)); }
     if (b.engine === 'splat') { this.splat(pt, d); this.last = { ...pt }; return; }
@@ -189,6 +275,8 @@ export class Stroke {
     let t = this.residual;
     while (t <= d) {
       const k = t / d;
+      // turn the tip smoothly between input points, so flat tips leave clean edges instead of little steps
+      this.dabDir = prevDir == null ? this.dir : prevDir + (this.dir - prevDir) * k;
       this.dab({ x: L.x + dx * k, y: L.y + dy * k, p: L.p + (pt.p - L.p) * k });
       t += sp;
     }
@@ -197,7 +285,7 @@ export class Stroke {
     this.last = { ...pt };
   }
 
-  tipAngle() { const b = this.b; return (b.follow && this.dir != null ? this.dir * 180 / Math.PI + 90 : 0) + (b.angle || 0); }
+  tipAngle() { const b = this.b, dir = this.dabDir ?? this.dir; return (b.follow && dir != null ? dir * 180 / Math.PI + 90 : 0) + (b.angle || 0); }
 
   dab(pt) {
     const b = this.b, g = this.g;
@@ -208,7 +296,7 @@ export class Stroke {
     if (b.engine === 'paint') return this.paintDab(x, y, s, pt.p);
     const flow = b.flow * (b.tool === 'airbrush' ? pt.p : this.strengthAt(pt.p));
     const color = b.engine === 'erase' ? '#000000' : this.color;
-    const t = tip(s, b.hard ?? 0.5, color, b.round ?? 1, this.tipAngle());
+    const sponge = b.tip === 'sponge', t = tip(s, b.hard ?? 0.5, color, b.round ?? 1, this.tipAngle() + (sponge ? Math.floor(this.rnd() * 12) * 30 : 0), b.tip, sponge ? Math.floor(this.rnd() * 4) : 0);
     g.save();
     if (b.engine === 'erase') g.globalCompositeOperation = 'destination-out';
     g.globalAlpha = Math.min(1, b.engine === 'marker' ? 1 : flow);
@@ -249,8 +337,8 @@ export class Stroke {
     this.bufC = mk(N, N); this.bufG = this.bufC.getContext('2d'); this.bufImg = this.bufG.createImageData(N, N);
     this.samp = mk(N, N, true); this.sampG = this.samp.getContext('2d', { willReadFrequently: true });
     this.dabC = mk(8, 8); this.maskC = mk(8, 8); this.tipC = mk(8, 8); this.grC = mk(8, 8);
-    if (b.tip === 'bristle') {
-      const n = Math.round(b.bristles || 24); this.hairs = [];
+    if (HAIR_SHAPES.has(b.tip)) {
+      const n = Math.round(b.tip === 'rake' ? Math.max(4, Math.min(14, (b.bristles || 24) / 3)) : (b.bristles || 24)); this.hairs = [];
       for (let i = 0; i < n; i++) this.hairs.push({ off: (i + this.rnd() * 0.8) / n * 2 - 1, load: 0.8 + this.rnd() * 0.4, w: 0.5 + this.rnd(), ph: this.rnd() * 100, f: 0.6 + this.rnd() * 0.8, sh: this.rnd() });
     }
     this.tipKey = '';
@@ -266,22 +354,23 @@ export class Stroke {
     g.translate(r, r);
     const env = (soft) => { // the outline of the tip
       g.save(); g.scale(b.tip === 'flat' ? Math.max(0.08, b.round ?? 0.25) : 1, b.tip === 'flat' ? 1 : Math.max(0.08, b.round ?? 1));
+      if (PATH_SHAPES.has(b.tip)) { g.fillStyle = '#000'; fillShape(g, b.tip, r, soft); g.restore(); return; }
       const gr = g.createRadialGradient(0, 0, 0, 0, 0, r);
       gr.addColorStop(0, '#000'); gr.addColorStop(Math.min(0.98, Math.max(0.02, soft)), '#000'); gr.addColorStop(1, 'rgba(0,0,0,0)');
       g.fillStyle = gr;
       if (b.tip === 'flat') { g.beginPath(); g.roundRect(-r, -r, D, D, r * 0.25); g.fill(); } else { g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill(); }
       g.restore();
     };
-    if (b.tip === 'bristle') {
+    if (this.hairs) {
       // each hair is a streak running along the stroke; drying hairs fade and skip
       g.fillStyle = '#000';
       const avg = this.hairs.reduce((s, h) => s + Math.max(0, h.load), 0) / this.hairs.length;
-      if (avg > 0.45) { g.globalAlpha = Math.min(0.42, (avg - 0.45) * 1.2); g.fillRect(-r, -r * 0.92, D, r * 1.84); } // a loaded brush has a solid core
+      if (avg > 0.45 && b.tip !== 'rake') { g.globalAlpha = Math.min(0.42, (avg - 0.45) * 1.2); g.fillRect(-r, -r * 0.92, D, r * 1.84); } // a loaded brush has a solid core
       for (const h of this.hairs) {
         let a = Math.min(1, Math.max(0, h.load * 1.3));
         if (h.load < 0.4 && noise1(h.ph + this.dist * 0.01 * h.f) > h.load * 2.4) a *= 0.08;
         if (a < 0.02) continue;
-        const w = Math.max(0.7, D / this.hairs.length * h.w * 0.95);
+        const w = Math.max(0.7, D / this.hairs.length * (b.tip === 'rake' ? 0.45 : h.w * 0.95));
         g.globalAlpha = a * (0.4 + h.sh * 0.6);
         g.fillRect(-r, h.off * r * 0.96 - w / 2, D, w);
       }
@@ -291,7 +380,7 @@ export class Stroke {
       g.globalCompositeOperation = 'destination-out'; g.fillStyle = '#000';
       for (let i = 0; i < D * 0.6; i++) { const a = this.rnd() * 6.283, rr = Math.sqrt(this.rnd()) * r; g.globalAlpha = 0.3 + this.rnd() * 0.5; g.fillRect(Math.cos(a) * rr, Math.sin(a) * rr, 1 + this.rnd() * D * 0.03, 1 + this.rnd() * D * 0.03); }
       g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
-    } else env(b.hard ?? 0.6);
+    } else { env(b.hard ?? 0.6); if (b.tip === 'sponge') spongeHoles(g, r, () => this.rnd()); }
     g.setTransform(1, 0, 0, 1, 0, 0);
   }
 
@@ -306,18 +395,21 @@ export class Stroke {
     const L = 1 - Math.pow(1 - Math.min(0.99, b.load * (0.3 + 0.7 * p)), kStep), K = this.K;
     const depl = b.dry ? Math.min(0.2, b.dry * 0.004 * (b.spacing / 0.05)) : 0;
     const ryb = this.mixRYB, blurAmt = b.soften || 0;
+    const dr = b.drag ?? 0.5, dragK = Math.pow(2, (dr - 0.5) * 6), fadeK = Math.min(1.6, Math.pow(1 / dragK, 0.8));
     for (let i = 0; i < N * N; i++) {
       const j = i * 4, ua = S[j + 3] / 255;
       let A = buf[j + 3], c0 = buf[j], c1 = buf[j + 1], c2 = buf[j + 2];
       if (pick > 0) {
-        const wb = A * (1 - pick * (0.35 + 0.65 * ua)), wu = ua * pick;
+        // drag: how strongly the paint already on the brush wins over the color under it, and how slowly it runs out
+        const keep = 1 - pick * (0.35 + 0.65 * ua);
+        const wb = A * keep * dragK, wu = ua * pick;
         const tot = wb + wu;
         if (wu > 0.0005 && tot > 0) {
           let u0 = S[j] / 255, u1 = S[j + 1] / 255, u2 = S[j + 2] / 255;
           if (ryb) [u0, u1, u2] = rgb2ryb(u0, u1, u2);
           c0 = (c0 * wb + u0 * wu) / tot; c1 = (c1 * wb + u1 * wu) / tot; c2 = (c2 * wb + u2 * wu) / tot;
         }
-        A = Math.min(1, tot);
+        A = Math.min(1, A * Math.max(0, 1 - (1 - keep) * fadeK) + wu);
       }
       if (L > 0) {
         const keep = A * (1 - L), tot = keep + L;
@@ -338,7 +430,7 @@ export class Stroke {
     // 3. the tip mask: shape, hairs, paper grain
     if (this.hairs) for (const h of this.hairs) h.load -= (b.spacing * s) * 0.0009 * (b.dry || 0) * (1.4 - h.w * 0.4) * (40 / Math.max(10, b.size)) * 1.5;
     // the tip is only redrawn when its size changes or the hairs have dried a little more
-    const key = Math.round(D / 2) + '|' + (this.hairs ? Math.floor(this.dist / Math.max(3, s * 0.35)) : 0) + (b.tip === 'chalk' ? '|' + (Math.floor(this.dist / Math.max(3, s * 0.2)) % 4) : '');
+    const key = Math.round(D / 2) + '|' + (this.hairs ? Math.floor(this.dist / Math.max(3, s * 0.35)) : 0) + (b.tip === 'chalk' || b.tip === 'sponge' ? '|' + (Math.floor(this.dist / Math.max(3, s * 0.2)) % 4) : '');
     if (key !== this.tipKey) { this.buildTip(D); this.tipKey = key; }
     const m = this.maskC; if (m.width < D || m.height < D) { m.width = D; m.height = D; }
     const mg = m.getContext('2d');
@@ -371,7 +463,7 @@ export class Stroke {
     g.globalAlpha = strength;
     g.drawImage(dc, 0, 0, D, D, x - r, y - r, D, D);
     g.restore();
-    if (b.impasto > 0 && this.o.heightCtx) { const h = this.o.heightCtx; h.save(); h.globalAlpha = Math.min(1, 0.35 * b.impasto * (0.5 + 0.5 * p)); h.drawImage(m, 0, 0, D, D, x - r, y - r, D, D); h.restore(); }
+    if (b.impasto > 0 && this.o.heightCtx) { const h = this.o.heightCtx; h.save(); h.globalAlpha = Math.min(1, 0.09 * b.impasto * (0.5 + 0.5 * p)); h.drawImage(m, 0, 0, D, D, x - r, y - r, D, D); h.restore(); }
     this.grow(x, y, r);
   }
 
@@ -423,7 +515,7 @@ export class Stroke {
   finish(layerCtx = this.g) {
     const b = this.b;
     if (b.engine === 'paint' && b.impasto > 0 && this.o.heightCtx) {
-      reliefLight(layerCtx, this.o.heightCtx.canvas, this.bbox, b.impasto);
+      reliefLight(layerCtx, this.o.heightCtx.canvas, this.bbox, b.impasto, b.size);
       const [x0, y0, x1, y1] = this.bbox; this.o.heightCtx.clearRect(x0 - 2, y0 - 2, x1 - x0 + 4, y1 - y0 + 4);
     }
   }
@@ -441,23 +533,41 @@ export class Stroke {
   }
 }
 
-// Thick paint: the brush marks in the height canvas become ridges lit from the top left.
-export function reliefLight(ctx, heightCanvas, bbox, amount = 1) {
+// Thick paint: the brush marks in the height canvas become soft rounded ridges lit from the top left.
+// The height is blurred first so the paint looks like a smooth body of paint with bristle grooves,
+// not thin stamped outlines.
+export function reliefLight(ctx, heightCanvas, bbox, amount = 1, size = 30) {
   const W = ctx.canvas.width, H = ctx.canvas.height;
   const x0 = Math.max(0, Math.floor(bbox[0]) - 2), y0 = Math.max(0, Math.floor(bbox[1]) - 2), x1 = Math.min(W, Math.ceil(bbox[2]) + 2), y1 = Math.min(H, Math.ceil(bbox[3]) + 2);
-  const w = x1 - x0, h = y1 - y0; if (w < 3 || h < 3) return;
+  const w = x1 - x0, h = y1 - y0; if (w < 5 || h < 5) return;
   const hd = heightCanvas.getContext('2d').getImageData(x0, y0, w, h).data, id = ctx.getImageData(x0, y0, w, h), d = id.data;
-  const Hm = new Float32Array(w * h); let hmax = 0;
+  let Hm = new Float32Array(w * h), T = new Float32Array(w * h); let hmax = 0;
   for (let i = 0; i < w * h; i++) { Hm[i] = hd[i * 4 + 3] / 255; if (Hm[i] > hmax) hmax = Hm[i]; }
   if (hmax <= 0) return;
-  // only the ridges inside the paint get light and shadow; the outer edge of the stroke is left alone (no outline)
-  const k = 140 * amount;
+  for (let i = 0; i < w * h; i++) Hm[i] /= hmax;
+  // two box blurs = a soft round profile; wider brushes get a wider, rounder body
+  const rad = Math.max(2, Math.min(10, Math.round(size * 0.09)));
+  const blur = (src, dst, horiz) => {
+    const n = horiz ? w : h, m = horiz ? h : w, st = horiz ? 1 : w, ln = horiz ? w : 1, k = 1 / (rad * 2 + 1);
+    for (let j = 0; j < m; j++) {
+      const base = j * ln; let acc = 0;
+      for (let i = -rad; i <= rad; i++) acc += src[base + Math.max(0, Math.min(n - 1, i)) * st];
+      for (let i = 0; i < n; i++) { dst[base + i * st] = acc * k; acc += src[base + Math.min(n - 1, i + rad + 1) * st] - src[base + Math.max(0, i - rad) * st]; }
+    }
+  };
+  const raw = Hm.slice();
+  for (let p = 0; p < 2; p++) { blur(Hm, T, true); blur(T, Hm, false); }
+  // keep a little of the sharp bristle grooves on top of the soft body
+  for (let i = 0; i < w * h; i++) Hm[i] = Hm[i] * 0.86 + raw[i] * 0.14 * Math.min(1, Hm[i] * 3);
+  const k = 30 * amount / Math.max(1, rad * 0.45);
   for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
-    const i = y * w + x; if (d[i * 4 + 3] < 8 || Hm[i] <= 0) continue;
-    const inner = Math.min(Hm[i - 1], Hm[i + 1], Hm[i - w], Hm[i + w], Hm[i]) / hmax;
-    const wgt = Math.max(0, Math.min(1, (inner - 0.45) / 0.35)); if (wgt <= 0) continue;
+    const i = y * w + x, a = d[i * 4 + 3]; if (a < 8) continue;
+    const hv = Hm[i]; if (hv < 0.02) continue;
+    // fade the effect in smoothly from the thin edge of the paint
+    const wgt = Math.min(1, hv / 0.35) * (a / 255);
     const dx = Hm[i + 1] - Hm[i - 1], dy = Hm[i + w] - Hm[i - w];
-    const l = Math.max(-40, Math.min(40, (-dx - dy) * k / hmax)) * wgt, spec = Math.max(0, l - 18) * 0.5;
+    const slope = (-dx - dy) * k;
+    const l = Math.tanh(slope) * 42 * wgt, spec = Math.max(0, Math.tanh(slope * 1.4) - 0.5) * 46 * wgt;
     for (let c = 0; c < 3; c++) d[i * 4 + c] = Math.max(0, Math.min(255, d[i * 4 + c] + l + spec));
   }
   ctx.putImageData(id, x0, y0);

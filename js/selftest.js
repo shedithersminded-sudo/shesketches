@@ -46,6 +46,51 @@ async function run() {
       const m = mixPaint('#1f4fa8', '#f2d21a', 0.5), n = parseInt(m.slice(1), 16);
       t(((n >> 8) & 255) > (n >> 16) && ((n >> 8) & 255) > (n & 255), 'Palette mixer: blue + yellow = green', m);
     }
+    // every tip shape works on dry brushes, wet paint, blenders and erasers, and a square tip really is square
+    {
+      const { TIP_SHAPES } = await import('./brushes.js');
+      const dot = (b, color, fill) => {
+        const cv = document.createElement('canvas'); cv.width = cv.height = 120; const cx = cv.getContext('2d');
+        if (fill) { cx.fillStyle = '#1f4fa8'; cx.fillRect(0, 0, 60, 120); cx.fillStyle = '#f2d21a'; cx.fillRect(60, 0, 60, 120); }
+        const pre = document.createElement('canvas'); pre.width = pre.height = 120; pre.getContext('2d').drawImage(cv, 0, 0);
+        const before = sum2(cx);
+        const s = new Stroke(b, cx, { color, layerCtx: cx, sampleSrc: pre });
+        for (let i = 0; i <= 12; i++) s.add({ x: 30 + i * 5, y: 60, p: 0.7 });
+        s.finish(cx); return { cx, changed: sum2(cx) !== before };
+      };
+      const sum2 = cx => { const d = cx.getImageData(0, 0, 120, 120).data; let v = 0; for (let i = 0; i < d.length; i += 4) v += d[i] + d[i + 1] * 2 + d[i + 2] + d[i + 3] * 5; return v; };
+      const bad = [];
+      for (const k of Object.keys(TIP_SHAPES)) {
+        if (!dot({ ...PRESETS.find(x => x.id === 'pencil-hb'), tip: k, size: 30, grain: 0 }, '#a02040').changed) bad.push('pencil ' + k);
+        if (!dot({ ...PRESETS.find(x => x.id === 'oil'), tip: k, size: 30 }, '#a02040').changed) bad.push('oil ' + k);
+        if (!dot({ ...PRESETS.find(x => x.id === 'smudge'), tip: k, size: 30 }, '#808080', true).changed) bad.push('blender ' + k);
+      }
+      t(!bad.length, `All ${Object.keys(TIP_SHAPES).length} tip shapes draw, paint and blend`, bad.length ? 'no change: ' + bad.join(', ') : 'dry, wet and blender');
+      // one square dab vs one round dab: the corner is only filled by the square
+      const one = tipName => { const cv = document.createElement('canvas'); cv.width = cv.height = 80; const cx = cv.getContext('2d'); const s = new Stroke({ engine: 'stamp', tip: tipName, size: 60, hard: 1, opacity: 1, flow: 1, min: 1, pOpacity: 0, spacing: 1 }, cx, { color: '#000000' }); s.add({ x: 40, y: 40, p: 1 }); return cx.getImageData(40 + 25, 40 + 25, 1, 1).data[3]; };
+      const sq = one('square'), rd = one('round');
+      t(sq > 150 && rd < 20, 'Square tips are square, round tips are round', `corner alpha square ${sq}, round ${rd}`);
+    }
+    // drag: a high drag smudge carries blue further into the yellow than a low drag one
+    {
+      const reach = drag => {
+        const cv = document.createElement('canvas'); cv.width = 400; cv.height = 60; const cx = cv.getContext('2d');
+        cx.fillStyle = '#1f4fa8'; cx.fillRect(0, 0, 100, 60); cx.fillStyle = '#f2d21a'; cx.fillRect(100, 0, 300, 60);
+        const pre = document.createElement('canvas'); pre.width = 400; pre.height = 60; pre.getContext('2d').drawImage(cv, 0, 0);
+        const s = new Stroke({ ...PRESETS.find(x => x.id === 'smudge'), size: 30, drag }, cx, { color: '#808080', layerCtx: cx, sampleSrc: pre });
+        for (let i = 0; i <= 60; i++) s.add({ x: 40 + i * 5, y: 30, p: 0.7 });
+        const d = cx.getImageData(220, 30, 1, 1).data; return d[2] - d[0] * 0.3; // how blue it still is far into the yellow
+      };
+      const lo = reach(0.05), hi = reach(0.95);
+      t(hi > lo + 15, 'Drag setting: high drag smears colors further', `blue 120 px into the yellow: low ${lo.toFixed(0)}, high ${hi.toFixed(0)}`);
+    }
+    // color wheel math round-trips
+    {
+      const { hexToHsv, hsvToHex } = await import('./colorwheel.js');
+      const list = ['#1f4fa8', '#f2d21a', '#b3211e', '#2f5d3a', '#ffffff', '#000000', '#808080', '#ef8fa0'];
+      const off = list.filter(c => hsvToHex(...hexToHsv(c)) !== c);
+      t(!off.length, 'Color wheel turns colors into hue, strength and lightness and back exactly', off.length ? 'off: ' + off.join(', ') : list.length + ' colors');
+    }
     // the page drawing for the export tests
     PRESETS.filter(p => p.kind === 'draw' && p.engine !== 'paint').forEach((p, i) => {
       const s = new Stroke(p, g, { color: p.color || '#7a0f12', paper: 'sketch', layerCtx: g });
