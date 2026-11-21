@@ -1,3 +1,4 @@
+import { Stroke, PRESETS } from './brushes.js';
 // Make your own paper: color, tooth, fibers, speckles, creases, aging and printed lines.
 // Saved as a few numbers in this browser, then it shows up in every paper list.
 import { getSetting, setSetting, uid } from './db.js';
@@ -22,7 +23,21 @@ export async function openPaperMaker(onSaved, startFrom) {
       // a close-up with a pencil and pastel test so you can see the tooth
       const g = close.getContext('2d'); paintPaper(g, 300, 300, '__preview', null, null, 2);
       const tile = paperTile('__preview');
-      g.save(); g.globalAlpha = 0.85; g.fillStyle = g.createPattern(tile.normal, 'repeat'); g.globalCompositeOperation = 'overlay'; g.fillRect(0, 0, 300, 300); g.restore();
+      // light the bumps from the side: turn the bump map (stored as colors) into light and shadow
+      const nc = tile.normal, nw = nc.width, nh = nc.height, nd = nc.getContext('2d').getImageData(0, 0, nw, nh).data;
+      const lit = document.createElement('canvas'); lit.width = nw; lit.height = nh; const lg = lit.getContext('2d'), li = lg.createImageData(nw, nh), ld = li.data;
+      const L = [-0.75, -0.45, 0.5], ll = Math.hypot(...L); L[0] /= ll; L[1] /= ll; L[2] /= ll;
+      for (let i = 0; i < nw * nh; i++) {
+        const x = nd[i * 4] / 127.5 - 1, y = nd[i * 4 + 1] / 127.5 - 1, z = nd[i * 4 + 2] / 127.5 - 1;
+        const v = Math.max(0, Math.min(255, 128 + ((x * L[0] + y * L[1] + z * L[2]) - L[2]) * 420));
+        ld[i * 4] = ld[i * 4 + 1] = ld[i * 4 + 2] = v; ld[i * 4 + 3] = 255;
+      }
+      lg.putImageData(li, 0, 0);
+      g.save(); g.globalAlpha = 0.8; g.fillStyle = g.createPattern(lit, 'repeat'); g.globalCompositeOperation = 'soft-light'; g.fillRect(0, 0, 300, 300); g.restore();
+      // a soft pencil scribble and a pastel stroke, so you can see how the tooth catches them
+      const mark = (id, color, pts) => { const pr = PRESETS.find(q => q.id === id); if (!pr) return; const st = new Stroke({ ...pr, size: pr.size * 0.9 }, g, { color, paper: '__preview', layerCtx: g }); for (const q of pts) st.add(q); st.finish(g); };
+      mark('pencil-6b', '#2a2a2c', Array.from({ length: 40 }, (_, i) => ({ x: 40 + i * 5.5, y: 95 + Math.sin(i / 3) * 18, p: 0.55 })));
+      mark('soft-pastel', '#c86aa0', Array.from({ length: 30 }, (_, i) => ({ x: 50 + i * 7, y: 205 + Math.cos(i / 4) * 12, p: 0.5 })));
       delete PAPERS.__preview; dropPaperCache('__preview');
     }, 80);
   };

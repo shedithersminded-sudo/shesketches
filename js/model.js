@@ -39,6 +39,30 @@ export function pagePx(book) {
   return { w: Math.round(wMM / 25.4 * dpi), h: Math.round(hMM / 25.4 * dpi) };
 }
 
+// Every part of the book you can draw on. The front cover keeps using book.coverPage; the rest live in book.surf.
+export const SURFACES = {
+  cover: { name: 'Front cover', help: 'The outside of the front cover.' },
+  back: { name: 'Back cover', help: 'The outside of the back. The book flips over so you can see it.' },
+  inFront: { name: 'Inside front cover', help: 'The inside of the front cover, seen when you open the book.' },
+  inBack: { name: 'Inside back cover', help: 'The inside of the back cover, seen on the last spread.' },
+  spine: { name: 'Spine', help: 'The narrow side where the book is bound.' },
+  edge: { name: 'Page edges', help: 'The side of the pages, like a fore-edge painting.' },
+  desk: { name: 'Desk', help: 'The desk around the book. Draw on it or cover it in stickers.' },
+};
+// thickness of the page block and the covers, in mm
+export function blockMM(book) {
+  const sheets = Math.floor(book.pages.length / 2), cov = (book.binding === 'hard' ? 2.6 : book.binding === 'soft' ? 0.5 : 1.6) * (book.cover?.thickness || 1);
+  return { pages: Math.max(0.5, sheets * (book.paperWeight || 150) * 0.00125), cover: cov };
+}
+export function surfaceSize(book, key) {
+  const { w, h } = pagePx(book), t = blockMM(book), hMM = book.size.hMM;
+  // spine and page edges are long thin strips: as long as the page is tall, as high as the book is thick
+  if (key === 'spine') return { w: h, h: Math.max(48, Math.round(h * (t.pages + t.cover * 2) / hMM)) };
+  if (key === 'edge') return { w: h, h: Math.max(40, Math.round(h * t.pages / hMM)) };
+  if (key === 'desk') return { w: 2400, h: 2400 };
+  return { w, h };
+}
+
 export function newBookData(opts = {}) {
   const size = opts.size === 'custom' ? { w: opts.wMM || 148, h: opts.hMM || 210 } : SIZES[opts.size || 'a5'];
   return {

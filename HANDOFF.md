@@ -13,7 +13,7 @@ checked exports, local-first, honest limits.
 - Repo: https://github.com/shedithersminded-sudo/shesketches (branch `main`, public)
 - Live app: https://shedithersminded-sudo.github.io/shesketches/ (GitHub Pages from `main` /)
 - Local: `start.bat`, or launch config `shesketches` (python devserver.py, port 8800)
-- Self-test: http://localhost:8801/tests.html via launch config `shesketches-test` (separate port = separate data, so the user's books on 8800 are never touched). 41 checks, last run 41 passed
+- Self-test: http://localhost:8801/tests.html via launch config `shesketches-test` (separate port = separate data, so the user's books on 8800 are never touched). 47 checks, last run 47 passed. On localhost only, `window.__app` is the app object for testing
 
 ## How we work here
 - After every change: run tests.html, then commit and push. Pages updates in about a minute.
@@ -64,6 +64,14 @@ No build step. Vanilla JS ES modules. `three` is mapped with an import map in `i
 - **Customize:** four tabs, each with "Show me". Draw your own cover in the full editor.
 - **Saving and names:** saves a few seconds after you stop drawing, fully every 5 minutes, and when you switch tabs or close. A restore point every 5 minutes, 24 kept (about 2 hours), in Page > Restore points. Status shows "Saved X min ago".
   Name a page in the box at the top of the editor (or Page > Name). Names show on the book's Draw buttons and in export file names.
+- **Every part of the book:** "✎ Draw on…" (and Customize > Cover) opens the front cover, back cover, inside covers, spine, page edges (fore-edge) or desk in the full editor. Parts are pages in `book.surf` (front stays `book.coverPage`), sizes from `surfaceSize()` in model.js. The editor's paper for a part is the real material (`Book3D.surfaceBase`). "⟲ Turn over" (O) flips the closed book to show the back.
+- **Desk:** 12 surfaces incl. marble, cork, linen, slate, pine, colored felt, or your own photo; pattern size; draw and stick on it (a 5x5 book-height area under the book, `DESK_ART`).
+- **Stickers on the book:** drag stickers onto pages, covers, back cover or desk. Press and drag a placed sticker right on the 3D book to move it; double-click it to open it in the editor. In the editor, double-click any sticker or text with any tool to pick it up, triple-click to open its look.
+- **Sticker looks:** 32 presets; border styles (two-tone, rainbow, fade, cut line, stitched, glitter, chrome, hand drawn), outer and inner lines, glow, 15 finishes plus a second finish, shine angle, 25 textures, see-through. Factory: 7 outline shapes x 5 color styles, lines on the outline, and a baked-in look.
+- **Starter pieces:** a second set (`STARTERS_2`, ~90) is added once for everyone (`seeded2`): "Cute sticker" maker (27 shapes, patterns, faces, words) and "Scrapbook piece" maker (wax seals, key charm, cut-out and arched words, rhinestones, labels, receipts, clips, spiral, retro window, label tape, keycaps, old folded paper and more), made from the user's Pinterest inspo without copying brands.
+- **Phones and iPad:** pinch zoom, two-finger pan, two-finger tap undo, three-finger tap redo, palm rejection once a pen is used (Fingers setting). Side panel slides in (☰ Brushes), toolbar wraps on two rows under 900 px, bigger touch targets, closed book centered on tall screens. Own GIF reader for Safari (`decodeGifJS`). Lower undo memory on phones and tablets.
+- **Speed:** GIFs redraw only when their frame changes; the editor and the book reuse still layers around moving ones.
+- **Brushes:** Stabilizer (pulled string) in Basics, shown as a dashed line while drawing. Ribbon bookmark is a simulated satin strip that drapes and sways.
 - **Copy style:** help lines are one short sentence. Brush descriptions say what it is and what it is best for. Brush groups and setting groups fold.
 - **Editor:** 75 brushes in every section. Tip shapes for brushes, blenders and erasers. Drag setting (how far colors smear) in brush settings and the dock.
   Double-click the page = quick menu (right button does nothing). Color wheel in the panel (right under Brushes) and as a popup (C or click the color chip). Big handles, new vs old color, color name, Color / Strength / Lightness sliders, arrow keys work, screen reader labels.

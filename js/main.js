@@ -1,22 +1,22 @@
 // SHESKETCHES app shell: shelf, book view, customizing, settings and the welcome guide.
 import { db, uid, getSetting, setSetting, persist, usage, collectGarbage, unpackBook, getBlob, putBlob } from './db.js';
-import { createBook, addPages, removePages, deleteBook, newPageData, SIZES, BINDINGS, BOOK_TYPES, pagePx } from './model.js';
+import { createBook, addPages, removePages, deleteBook, newPageData, SIZES, BINDINGS, BOOK_TYPES, pagePx, SURFACES, surfaceSize } from './model.js';
 import { PAPERS, COVERS, DESKS } from './paper.js';
 import { Book3D } from './book3d.js';
 import { Editor } from './editor.js';
 import { openExport, verify } from './exporter.js';
 import { openFactory, openMakers, seedStarters } from './stickers.js';
-import { STARTERS } from './makers.js';
+import { STARTERS, STARTERS_2 } from './makers.js';
 import { openDither } from './dither.js';
 import { openPaperMaker, loadCustomPapers } from './papermaker.js';
 import { importFiles, assetGrid, assetURL, SYSTEM_FONTS, loadAllFonts, MEDIA_ACCEPT } from './library.js';
-import { makeThumb } from './render.js';
+import { makeThumb, canvasBlob, itemSize, loadRes } from './render.js';
 import { el, $, toast, modal, confirmBox, promptBox, slider, select, colorInput, check, numberInput, pickFiles, saveFile, chooseExportFolder, fmtBytes, safeName } from './ui.js';
 
 const THEMES = { desk: "Artist's desk", studio: 'Digital studio', minimal: 'Minimal', scrap: 'Scrapbook', pro: 'Illustration studio' };
 const VIEW_KEYS = ['angled', 'top', 'low', 'front', 'left', 'right', 'pageL', 'pageR', 'spine', 'edge'];
 const BOOK_KEYS = [
-  ['← / →', 'Turn the page back / forward'], ['Page Up / Page Down', 'Same as the arrows'], ['Home / End', 'Jump to the cover / the back'],
+  ['O', 'Turn the closed book over to see the back'], ['← / →', 'Turn the page back / forward'], ['Page Up / Page Down', 'Same as the arrows'], ['Home / End', 'Jump to the cover / the back'],
   ['Click a page edge', 'Turn that page'], ['Drag a page corner', 'Turn it by hand (grab a top or bottom corner to curl it)'], ['Double-click a page', 'Draw on it'],
   ['Right-drag', 'Look around the book'], ['Middle-drag', 'Slide the view'], ['Scroll', 'Zoom in and out'],
   ['1 to 9, 0', 'Camera angles: angled, top, low, front, left, right, left page, right page, spine, page edges'],
@@ -37,10 +37,13 @@ const app = {
     persist();
     loadAllFonts();
     await loadCustomPapers();
-    if (!(await getSetting('seeded', false))) {
-      await setSetting('seeded', true);
-      const t = el('div', { class: 'toast in' }, 'Setting up your starter pieces…'); document.body.append(t);
-      seedStarters(STARTERS, (n, N) => t.textContent = `Setting up your starter pieces… ${n} of ${N}`).then(() => { t.remove(); if (!this.book) this.home(); });
+    // starter stickers and pieces: the first set for new people, and newer sets for everyone once
+    const sets = [];
+    if (!(await getSetting('seeded', false))) { await setSetting('seeded', true); sets.push(STARTERS); }
+    if (!(await getSetting('seeded2', false))) { await setSetting('seeded2', true); sets.push(STARTERS_2); }
+    if (sets.length) {
+      const t = el('div', { class: 'toast in' }, 'Adding starter stickers…'); document.body.append(t);
+      (async () => { for (const set of sets) await seedStarters(set, (n, N) => t.textContent = `Adding starter stickers… ${n} of ${N}`); })().then(() => { t.remove(); if (!this.book && !this.editor) this.home(); });
     }
     window.addEventListener('beforeunload', e => { if (this.editor && this.editor.isChanged) { this.editor.save(); e.preventDefault(); e.returnValue = ''; } });
     await this.home();
@@ -158,6 +161,8 @@ const app = {
       el('button', { class: 'btn', onclick: () => this.pagesDialog() }, 'Pages'),
       el('button', { class: 'btn', onclick: () => this.customize() }, 'Customize'),
       el('button', { class: 'btn', title: 'Drag your stickers, made pieces, art and GIFs onto the cover or any page (T)', onclick: () => this.stickerTray() }, '★ Stickers'),
+      el('button', { class: 'btn', title: 'Draw on any part: covers, insides, spine, page edges or the desk', onclick: e => this.surfaceMenu(e.currentTarget) }, '✎ Draw on…'),
+      this.turnBtn = el('button', { class: 'btn', title: 'Turn the closed book over to see the back cover (O)', onclick: () => this.toggleFlip() }, '⟲ Turn over'),
       this.flickBtn,
       el('button', { class: 'btn', onclick: () => openExport(this, b, { tab: 'video', pageIndex: this.currentPage() }) }, 'Export'),
       this.recBtn = el('button', { class: 'btn', title: 'Record the view while you flip (R)', onclick: () => this.toggleRecord() }, '● Record'),
@@ -183,6 +188,7 @@ const app = {
     });
     this.book3d.on('pos', () => this.updatePos(posLbl));
     this.book3d.on('openPage', i => this.openEditor(i));
+    this.bindStickerDrag();
     this.book3d.on('camera', () => this.updPad());
     this.book3d.on('free', on => { stage.classList.toggle('free', on); this.viewPad.querySelector('.free-btn').classList.toggle('lit', on); });
     this.book3d.on('flickEnd', () => this.flickBtn.textContent = '⏩ Flick');
@@ -196,6 +202,8 @@ const app = {
         if (k === 'escape') { B.setFree(false); return; }
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (B.flipped && ['ArrowRight', 'ArrowLeft', 'PageDown', 'PageUp'].includes(e.key)) { this.toggleFlip(false); return; }
+      if (k === 'o') return this.toggleFlip();
       if (e.key === 'ArrowRight' || e.key === 'PageDown') B.next();
       else if (e.key === 'ArrowLeft' || e.key === 'PageUp') B.prev();
       else if (e.key === 'Home') B.goTo(0);
@@ -238,6 +246,7 @@ const app = {
         el('div', { class: 'vp-grid' }, vb('angled', 'Angled'), vb('top', 'Top'), vb('low', 'Low'), vb('front', 'Front'), vb('left', 'Left'), vb('right', 'Right'), vb('pageL', 'L page'), vb('pageR', 'R page'), vb('spine', 'Spine'), vb('edge', 'Edges'), vb('cover', 'Cover'), vb('back', 'Under')),
         el('label', { class: 'vp-zoom' }, 'Zoom', zoom),
         el('div', { class: 'row' }, el('button', { class: 'btn small free-btn', title: 'Fly around freely (C)', onclick: () => this.book3d.setFree(!this.book3d.free) }, '✈ Free camera'), el('button', { class: 'btn small', title: 'Back to the normal view', onclick: () => this.book3d.viewTo('angled') }, 'Reset'))));
+    if (innerWidth < 700) pad.classList.add('min'); // small screens start with the camera pad folded away
     return pad;
   },
   updPad() {
@@ -286,22 +295,139 @@ const app = {
     if (!b.coverPage) { const p = newPageData(b, 0); p.layers[0].name = 'Cover art'; p.paper = { type: 'smooth', color: b.cover.color }; await db.put('pages', p); b.coverPage = p.id; await db.put('books', b); }
     return db.get('pages', b.coverPage);
   },
+  // ---------- move stickers right on the book ----------
+  // press on a sticker (or text) on a page, the covers or the desk and drag it; double-click it to open it in the editor
+  bindStickerDrag() {
+    const c = this.book3d.canvas, B = this.book3d;
+    // the pages you can see, kept ready so a press can be checked instantly (before the page starts turning)
+    const cache = this.stickerPages = new Map();
+    const idOf = hit => hit.kind === 'page' ? this.book.pages[hit.idx] : hit.kind === 'cover' ? this.book.coverPage : this.book.surf?.[hit.kind];
+    let lastFill = 0;
+    this.fillStickerCache = async () => {
+      lastFill = performance.now(); if (!this.book || !this.book3d) return;
+      const [l, r] = this.book3d.spread(), ids = [l, r].filter(i => i != null).map(i => this.book.pages[i]);
+      ids.push(this.book.coverPage, this.book.surf?.back, this.book.surf?.desk);
+      cache.clear();
+      for (const id of ids) if (id) { const p = await db.get('pages', id); if (p) cache.set(id, p); }
+    };
+    this.fillStickerCache();
+    const pageFor = hit => cache.get(idOf(hit));
+    const itemAt = (page, x, y) => {
+      for (let i = page.layers.length - 1; i >= 0; i--) {
+        const L = page.layers[i]; if (!L.visible || L.locked || (L.kind !== 'image' && L.kind !== 'text')) continue;
+        const sz = itemSize(L), sc = L.scale || 1, dx = x - L.x, dy = y - L.y, cs = Math.cos(-(L.rot || 0)), sn = Math.sin(-(L.rot || 0));
+        if (Math.abs(dx * cs - dy * sn) <= sz.w * sc / 2 && Math.abs(dx * sn + dy * cs) <= sz.h * sc / 2) return L;
+      }
+      return null;
+    };
+    let drag = null, busy = false, pending = false, last = null;
+    c.addEventListener('pointerdown', async e => {
+      if (e.button !== 0 || B.free || B.anim || this.editor) return;
+      const hit = B.hitAt(e.clientX, e.clientY); if (!hit) return;
+      const page = pageFor(hit); if (!page) return;
+      const L = itemAt(page, hit.x * page.w, hit.y * page.h); if (!L) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      // double-click: open it in the editor, picked up
+      const now = performance.now();
+      if (last && last.id === L.id && now - last.t < 450) {
+        last = null; const label = hit.kind === 'page' ? null : SURFACES[hit.kind].name;
+        if (hit.kind === 'page') await this.openEditor(hit.idx); else { this.lastSurface = hit.kind; await this.openEditor(-1, page.id, label); }
+        const ed = this.editor; if (ed) { ed.setTool('move'); ed.selectOnly(L.id); }
+        return;
+      }
+      last = { id: L.id, t: now };
+      try { c.setPointerCapture(e.pointerId); } catch (_) { }
+      drag = { hit, page, L, ox: hit.x * page.w - L.x, oy: hit.y * page.h - L.y, moved: false, res: await loadRes(page) };
+      c.style.cursor = 'grabbing';
+    }, true);
+    const preview = async () => {
+      if (busy) { pending = true; return; } busy = true;
+      try { await B.previewPart(drag.hit.kind, drag.page, drag.res, drag.hit.idx); } catch (err) { console.warn(err); }
+      busy = false; if (pending && drag) { pending = false; preview(); }
+    };
+    c.addEventListener('pointermove', e => {
+      if (!drag) { if (!e.buttons && performance.now() - lastFill > 900) this.fillStickerCache(); return; }
+      e.stopImmediatePropagation();
+      const h = B.hitAt(e.clientX, e.clientY);
+      if (!h || h.kind !== drag.hit.kind || (h.kind === 'page' && h.idx !== drag.hit.idx)) return; // stay on the same part
+      drag.L.x = h.x * drag.page.w - drag.ox; drag.L.y = h.y * drag.page.h - drag.oy; drag.moved = true;
+      preview();
+    }, true);
+    const up = async e => {
+      if (!drag) return;
+      e.stopImmediatePropagation();
+      const d = drag; drag = null; c.style.cursor = '';
+      if (!d.moved) return;
+      const P = await db.get('pages', d.page.id); const L = P.layers.find(l => l.id === d.L.id); if (!L) return;
+      L.x = d.L.x; L.y = d.L.y; P.ver = (P.ver || 1) + 1; P.updated = Date.now();
+      P.thumb = await putBlob(await makeThumb(P, this.book, 2048)); await db.put('pages', P);
+      await this.refreshPart(P);
+      this.fillStickerCache();
+    };
+    c.addEventListener('pointerup', up, true); c.addEventListener('pointercancel', up, true);
+  },
+
+  // ---------- every part of the book ----------
+  surfKeyOf(id) { const b = this.book; if (id === b.coverPage) return 'cover'; return Object.entries(b.surf || {}).find(([, v]) => v === id)?.[0] || null; },
+  async ensureSurface(key) {
+    const b = this.book;
+    if (key === 'cover') return this.ensureCoverPage();
+    b.surf ||= {};
+    let p = b.surf[key] && await db.get('pages', b.surf[key]);
+    if (!p) {
+      p = newPageData(b, 0); const sz = surfaceSize(b, key); p.w = sz.w; p.h = sz.h;
+      p.layers[0].name = SURFACES[key].name; p.surface = key;
+      b.surf[key] = p.id; await db.put('books', b);
+    }
+    // the "paper" you draw on is the real material of that part, so you see what you get
+    p.paper = { type: 'custom', custom: await putBlob(await canvasBlob(this.book3d.surfaceBase(key, p.w, p.h), 'image/jpeg', 0.9)) };
+    await db.put('pages', p);
+    return p;
+  },
+  async editSurface(key) {
+    if (key === 'cover') return this.editCover();
+    this.lastSurface = key;
+    const p = await this.ensureSurface(key);
+    this.openEditor(-1, p.id, SURFACES[key].name);
+  },
+  surfaceMenu(anchor) {
+    document.querySelector('.surf-menu')?.remove();
+    const r = anchor.getBoundingClientRect();
+    const m = el('div', { class: 'surf-menu', role: 'menu', style: { left: r.left + 'px', top: (r.bottom + 6) + 'px' } },
+      ...Object.entries(SURFACES).map(([k, v]) => el('button', { class: 'surf-item', role: 'menuitem', onclick: () => { m.remove(); this.editSurface(k); } }, el('b', {}, v.name), el('span', { class: 'muted small' }, v.help))));
+    document.body.append(m);
+    const away = e => { if (!m.contains(e.target) && e.target !== anchor) { m.remove(); document.removeEventListener('pointerdown', away, true); } };
+    setTimeout(() => document.addEventListener('pointerdown', away, true), 0);
+  },
+  toggleFlip(on = !this.book3d.flipped) {
+    this.book3d.setFlip(on);
+    this.turnBtn.classList.toggle('lit', on);
+    this.turnBtn.textContent = on ? '⟲ Turn back' : '⟲ Turn over';
+    if (on) setTimeout(() => this.book3d.viewTo('cover'), 300);
+  },
+  // redraw the part of the book a page belongs to
+  async refreshPart(p) {
+    const key = this.surfKeyOf(p.id);
+    if (!key) return this.book3d.invalidatePage(p.id);
+    if (key === 'desk') return this.book3d.loadDeskArt();
+    const pos = this.book3d.pos; await this.book3d.setBook(this.book); this.book3d.goTo(pos);
+  },
   async placeAsset(a, hit, cx, cy) {
-    const b = this.book, cover = hit.kind === 'cover';
-    const page = cover ? await this.ensureCoverPage() : await db.get('pages', b.pages[hit.idx]);
-    const s = Math.min(1, (page.w * (cover ? 0.4 : 0.32)) / a.w, (page.h * 0.4) / a.h);
+    const b = this.book, cover = hit.kind !== 'page', surfKey = hit.kind;
+    const page = cover ? await this.ensureSurface(surfKey) : await db.get('pages', b.pages[hit.idx]);
+    const s = Math.min(1, (page.w * (surfKey === 'desk' ? 0.06 : cover ? 0.4 : 0.32)) / a.w, (page.h * (surfKey === 'desk' ? 0.06 : 0.4)) / a.h);
     const L = { id: uid('l_'), name: a.name || 'Sticker', kind: 'image', src: a.blob, asset: a.id, media: a.media || null, iw: a.w, ih: a.h, x: hit.x * page.w, y: hit.y * page.h, scale: s, rot: (Math.random() - 0.5) * 0.15, visible: true, opacity: 1, blend: 'source-over', locked: false, filter: {}, shadow: { on: true, blur: 10, dx: 4, dy: 6, color: '#000000', a: 0.3 }, fx: a.kind === 'sticker' ? { finish: 'satin', finishAmt: 0.35 } : null };
     page.layers.push(L);
     page.ver = Math.max(2, (page.ver || 1) + 1); page.updated = Date.now();
     page.thumb = await putBlob(await makeThumb(page, b, 2048));
     await db.put('pages', page);
-    if (cover) { const pos = this.book3d.pos; await this.book3d.setBook(b); this.book3d.goTo(pos); } else this.book3d.invalidatePage(page.id);
+    await this.refreshPart(page);
     // a little popup to edit or undo right away
     document.querySelector('.place-pop')?.remove();
     const pop = el('div', { class: 'place-pop', style: { left: cx + 'px', top: cy + 'px' } },
-      el('span', {}, cover ? 'On the cover.' : `On page ${hit.idx + 1}.`),
-      el('button', { class: 'btn small primary', onclick: async () => { pop.remove(); if (cover) await this.openEditor(-1, b.coverPage); else await this.openEditor(hit.idx); const ed = this.editor; if (ed) { ed.setTool('move'); ed.selectOnly(L.id); } } }, 'Edit it'),
-      el('button', { class: 'btn small', onclick: async () => { pop.remove(); const p2 = await db.get('pages', page.id); p2.layers = p2.layers.filter(l => l.id !== L.id); p2.ver++; p2.thumb = null; await db.put('pages', p2); if (cover) { const pos = this.book3d.pos; await this.book3d.setBook(b); this.book3d.goTo(pos); } else this.book3d.invalidatePage(p2.id); } }, 'Undo'));
+      el('span', {}, cover ? `On the ${SURFACES[surfKey].name.toLowerCase()}.` : `On page ${hit.idx + 1}.`),
+      el('button', { class: 'btn small primary', onclick: async () => { pop.remove(); if (cover) await this.openEditor(-1, page.id, SURFACES[surfKey].name); else await this.openEditor(hit.idx); const ed = this.editor; if (ed) { ed.setTool('move'); ed.selectOnly(L.id); } } }, 'Edit it'),
+      el('button', { class: 'btn small', onclick: async () => { pop.remove(); const p2 = await db.get('pages', page.id); p2.layers = p2.layers.filter(l => l.id !== L.id); p2.ver++; p2.thumb = null; await db.put('pages', p2); await this.refreshPart(p2); } }, 'Undo'));
     document.body.append(pop);
     setTimeout(() => pop.remove(), 8000);
   },
@@ -321,11 +447,12 @@ const app = {
     if (l != null) this.editBtns.append(btn(l, false));
     if (r != null) this.editBtns.append(btn(r, true));
   },
-  async openEditor(i, pageId) {
+  async openEditor(i, pageId, label) {
     if (this.editor) return;
     document.querySelectorAll('.modal-back').forEach(m => m.remove());
+    document.querySelector('.surf-menu')?.remove();
     this.editor = new Editor(this);
-    await this.editor.open(this.book, i, pageId);
+    await this.editor.open(this.book, i, pageId, label);
   },
   async editCover() {
     const b = this.book;
@@ -339,13 +466,19 @@ const app = {
   onEditorClosed(i) {
     this.editor = null;
     if (!this.book3d) return;
-    if (i < 0) { this.book3d.goTo(0); this.book3d.viewTo('cover'); return; }
+    if (i < 0) {
+      const k = this.lastSurface; this.lastSurface = null;
+      const v = { back: () => { this.toggleFlip(true); }, inFront: () => { this.toggleFlip(false); this.book3d.goTo(1); this.book3d.viewTo('top'); }, inBack: () => { this.toggleFlip(false); this.book3d.goTo(this.book3d.maxPos); this.book3d.viewTo('top'); }, spine: () => { this.toggleFlip(false); this.book3d.goTo(0); this.book3d.viewTo('spine'); }, edge: () => { this.toggleFlip(false); this.book3d.goTo(0); this.book3d.viewTo('edge'); }, desk: () => this.book3d.viewTo('top') }[k];
+      if (v) return v();
+      this.toggleFlip(false); this.book3d.goTo(0); this.book3d.viewTo('cover'); return;
+    }
     const want = Math.floor((i + 1) / 2) + 1; if (Math.abs(this.book3d.pos - want) > 0) this.book3d.goTo(want);
   },
   async onPageSaved(p) {
     if (!this.book3d) return;
     if (p.id === this.book.coverPage) { await this.book3d.setBook(this.book); this.book3d.goTo(0); if (!this.editor) this.book3d.viewTo('cover'); return; }
-    this.book3d.invalidatePage(p.id);
+    this.refreshPart(p);
+    this.fillStickerCache?.();
   },
   openFactory(src, cb) { openFactory(src, cb); },
   openMakers(cb) { openMakers(cb); },
@@ -385,6 +518,10 @@ const app = {
       cover: () => [
         showBtn('Show me the cover', show(0, 'cover')),
         help('The front of the book. Pick a material, add your own art or draw a cover, and write a title.'),
+        el('h3', {}, 'Draw on any part'),
+        el('div', { class: 'row wrap' }, ...Object.entries(SURFACES).map(([k, v]) => el('button', { class: 'btn small', title: v.help, onclick: () => { m.close(); this.editSurface(k); } }, '✎ ' + v.name))),
+        el('div', { class: 'row wrap' }, el('button', { class: 'btn small', onclick: () => this.toggleFlip() }, '⟲ Turn the book over')),
+        help('Every part opens in the full editor with all brushes, layers and stickers.'),
         el('h3', {}, 'Material'),
         select('Material', c.material, Object.fromEntries(Object.entries(COVERS).map(([k, v]) => [k, v.name])), v => { c.material = v; apply(); }),
         colorInput('Cover color', c.color, v => { c.color = v; apply(); }),
@@ -450,8 +587,14 @@ const app = {
       scene: () => [
         showBtn('Show me the desk', show(null, 'low')),
         el('h3', {}, 'Desk'),
-        select('Surface', b.desk.kind, Object.fromEntries(Object.entries(DESKS).map(([k, v]) => [k, v.name])), v => { b.desk.kind = v; save(); this.book3d.setDesk(v, b.desk.color); }),
-        colorInput('Plain color', b.desk.color || '#2a2420', v => { b.desk.color = v; save(); if (b.desk.kind === 'plain') this.book3d.setDesk('plain', v); }),
+        select('Surface', b.desk.kind, { ...Object.fromEntries(Object.entries(DESKS).map(([k, v]) => [k, v.name])), ...(b.desk.photo ? { photo: 'My photo' } : {}) }, v => { b.desk.kind = v; save(); this.book3d.setDesk(v, b.desk.color, b.desk); }),
+        colorInput('Color (felt, linen, plain)', b.desk.color || '#2a2420', v => { b.desk.color = v; save(); if (['plain', 'felt', 'linen'].includes(b.desk.kind)) this.book3d.setDesk(b.desk.kind, v, b.desk); }),
+        slider('Pattern size', b.desk.scale || 1, 0.3, 3, 0.05, v => { b.desk.scale = v; save(); this.book3d.setDesk(b.desk.kind, b.desk.color, b.desk); }, v => Math.round(v * 100) + '%'),
+        el('div', { class: 'row wrap' },
+          el('button', { class: 'btn small', title: 'Use any photo as the desk, like your real table, a rug or a tablecloth', onclick: async () => { const f = await pickFiles('image/*', false); if (!f[0]) return; b.desk.photo = await putBlob(f[0]); b.desk.kind = 'photo'; save(); this.book3d.setDesk('photo', b.desk.color, b.desk); m.close(); this.czTab = 'scene'; this.customize(); } }, '🖼 Use my own photo'),
+          el('button', { class: 'btn small primary', title: 'Draw on the desk or cover it in stickers', onclick: () => { m.close(); this.editSurface('desk'); } }, '✎ Draw on the desk'),
+          b.surf?.desk ? el('button', { class: 'btn small danger', onclick: async () => { if (!(await confirmBox('Clear the desk?', 'Removes everything drawn and stuck on the desk. The book is not touched.', 'Clear'))) return; await db.del('pages', b.surf.desk); delete b.surf.desk; save(); this.book3d.book = b; this.book3d.loadDeskArt(); m.close(); this.czTab = 'scene'; this.customize(); } }, 'Clear desk') : null),
+        help('Drag stickers from the tray straight onto the desk for a sticker bomb.'),
         el('h3', {}, 'Light'),
         slider('Warm or cool', b.light.warmth, -1, 1, 0.01, v => { b.light.warmth = v; save(); this.book3d.setLight(b.light); }, v => v > 0.05 ? 'warm' : v < -0.05 ? 'cool' : 'neutral'),
         slider('Brightness', b.light.strength, 0.2, 2, 0.01, v => { b.light.strength = v; save(); this.book3d.setLight(b.light); }, v => Math.round(v * 100) + '%'),
@@ -541,5 +684,6 @@ const app = {
 };
 
 window.SHESKETCHES = app;
+if (location.hostname === 'localhost') window.__app = app; // for the self-test and debugging on this PC only
 app.init().catch(e => { console.error(e); document.body.append(el('pre', { class: 'fatal' }, 'SHESKETCHES could not start: ' + e.message)); });
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});

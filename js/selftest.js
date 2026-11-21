@@ -115,6 +115,43 @@ async function run() {
       for (const [k, p] of Object.entries(FX_PRESETS)) { if (k === 'plain') continue; const { name, ...v } = p; const r = applyFx(st, v, 'test'); if (sig(r.canvas) === base) same.push(name); }
       t(!same.length, `All ${Object.keys(FX_PRESETS).length - 1} sticker looks change the sticker`, same.length ? 'no change: ' + same.join(', ') : 'border, gloss, holo, glitter, foil, puffy, paper, vintage, patch, peeling, worn');
     }
+    // sticker factory: every outline shape and color style makes a sticker
+    {
+      const { composeSticker } = await import('./stickers.js');
+      const src = document.createElement('canvas'); src.width = src.height = 120; const sg = src.getContext('2d'); sg.fillStyle = '#2f5d8a'; sg.beginPath(); sg.arc(60, 60, 40, 0, 7); sg.fill();
+      const mask = new Uint8Array(120 * 120); const sd = sg.getImageData(0, 0, 120, 120).data; for (let i = 0; i < mask.length; i++) mask[i] = sd[i * 4 + 3];
+      const bad = [];
+      for (const style of ['diecut', 'torn', 'wavy', 'scallop', 'zigzag', 'cloud', 'glow']) for (const fill of ['solid', 'twotone', 'double', 'gradient', 'rainbow']) {
+        const c = composeSticker(src, mask, 120, 120, { outline: true, style, fill, line: 'dashed', width: 16, color: '#ffffff', color2: '#ff6ec7', bumps: 12 });
+        if (!(c.width > 88)) bad.push(style + '/' + fill + ' ' + c.width);
+      }
+      t(!bad.length, 'Sticker factory: 7 outline shapes x 5 color styles all work', bad.length ? 'failed: ' + bad.join(', ') : '35 combinations');
+    }
+    // moving media: the fast renderer only redraws when the GIF frame changes
+    {
+      const { motionSig, motionSplit } = await import('./render.js');
+      const fr = () => { const c = document.createElement('canvas'); c.width = c.height = 4; return c; };
+      const res = { a: { frames: [fr(), fr(), fr()], starts: [0, 100, 200], total: 300 }, p: fr() };
+      const layers = [{ id: 'p', kind: 'paint', visible: true }, { id: 'a', kind: 'image', visible: true, media: 'gif' }];
+      const s1 = motionSig(layers, res, 10), s2 = motionSig(layers, res, 50), s3 = motionSig(layers, res, 150);
+      t(s1 === s2 && s2 !== s3 && !!motionSplit(layers, res), 'GIFs only redraw when their frame changes', `frames ${s1} ${s2} ${s3}`);
+    }
+    // the built-in GIF reader (used on iPhone and iPad) reads frames like the browser does
+    {
+      const { decodeGifJS } = await import('./render.js'); const { encodeGif } = await import('./exporter.js');
+      const fr = []; for (let i = 0; i < 4; i++) { const c = document.createElement('canvas'); c.width = 40; c.height = 30; const g = c.getContext('2d'); g.fillStyle = ['#ff0000', '#00ff00', '#0000ff', '#ffff00'][i]; g.fillRect(0, 0, 40, 30); fr.push(g.getImageData(0, 0, 40, 30).data); }
+      const r = await decodeGifJS(encodeGif(fr, 40, 30, 10, 64, false, true, () => { }));
+      const px = i => { const c = document.createElement('canvas'); c.width = 40; c.height = 30; const g = c.getContext('2d'); g.drawImage(r.frames[i], 0, 0); return [...g.getImageData(20, 15, 1, 1).data]; };
+      const p1 = r && px(1), p2 = r && px(2);
+      t(!!r && r.frames.length === 4 && p1[1] > 200 && p2[2] > 200, 'GIFs play on iPhone and iPad too (own GIF reader)', r ? `${r.frames.length} frames, frame 2 rgb(${p1.slice(0, 3)}), frame 3 rgb(${p2.slice(0, 3)})` : 'could not read');
+    }
+    // every part of the book has a sensible size
+    {
+      const { surfaceSize, SURFACES } = await import('./model.js');
+      const bad = Object.keys(SURFACES).filter(k => { const z = surfaceSize(book, k); return !(z.w > 30 && z.h > 30); });
+      const sp = surfaceSize(book, 'spine');
+      t(!bad.length && sp.w > sp.h, `All ${Object.keys(SURFACES).length} book parts can be drawn on`, bad.length ? 'bad size: ' + bad.join(', ') : `spine ${sp.w} x ${sp.h} px`);
+    }
     // custom paper with printed lines
     registerPapers([{ id: 'u_test', name: 'Test', color: '#f0e8d8', lines: 'grid', lineColor: '#ff0000', lineGap: 0.05, crumple: 0.5 }]);
     { const cv = document.createElement('canvas'); cv.width = 300; cv.height = 400; paintPaper(cv.getContext('2d'), 300, 400, 'u_test', null, null, 1); const d2 = cv.getContext('2d').getImageData(0, 0, 300, 400).data; let red = 0; for (let i = 0; i < d2.length; i += 4) if (d2[i] > d2[i + 1] + 30) red++; t(red > 500, 'Paper maker papers draw with printed lines', red + ' line pixels'); }

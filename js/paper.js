@@ -68,7 +68,12 @@ export function registerPapers(list) {
 export const DESKS = {
   walnut: { name: 'Dark walnut' },
   oak:    { name: 'Light oak' },
-  felt:   { name: 'Black felt' },
+  pine:   { name: 'Pine wood' },
+  felt:   { name: 'Felt (any color)' },
+  linen:  { name: 'Linen tablecloth (any color)' },
+  marble: { name: 'White marble' },
+  slate:  { name: 'Dark slate' },
+  cork:   { name: 'Cork board' },
   concrete: { name: 'Concrete' },
   cutmat: { name: 'Cutting mat' },
   plain:  { name: 'Plain color' },
@@ -325,10 +330,37 @@ export function coverTile(material, color) {
 // ---------- desk ----------
 export function deskTile(kind, color = '#2a2420') {
   const N = 1024, c = mk(N, N), g = c.getContext('2d');
-  if (kind === 'walnut' || kind === 'oak') {
-    const n = fbm(N, 4, 4, kind === 'oak' ? 3 : 5, 0.55), fine = fbm(N, 128, 2, 9);
+  if (kind === 'marble') {
+    const n = fbm(N, 6, 5, 31, 0.55), v = fbm(N, 24, 3, 37, 0.5), id = g.createImageData(N, N), d = id.data;
+    for (let i = 0; i < N * N; i++) {
+      const x = i % N, y = (i / N) | 0, vein = Math.abs(Math.sin((x / N * 3 + y / N * 2 + n[i] * 4) * Math.PI));
+      const k = Math.pow(vein, 18) * 0.55 + Math.pow(vein, 4) * 0.12, base = 236 + v[i] * 14;
+      d[i * 4] = base - k * 150; d[i * 4 + 1] = base - k * 150; d[i * 4 + 2] = base - k * 140 + 4; d[i * 4 + 3] = 255;
+    }
+    g.putImageData(id, 0, 0); return c;
+  }
+  if (kind === 'slate') {
+    const n = fbm(N, 8, 5, 41, 0.6), f = fbm(N, 160, 2, 43), id = g.createImageData(N, N), d = id.data;
+    for (let i = 0; i < N * N; i++) { const k = 0.75 + n[i] * 0.35 + f[i] * 0.1; d[i * 4] = 52 * k; d[i * 4 + 1] = 56 * k; d[i * 4 + 2] = 62 * k; d[i * 4 + 3] = 255; }
+    g.putImageData(id, 0, 0); return c;
+  }
+  if (kind === 'cork') {
+    const n = fbm(N, 64, 3, 51, 0.6), id = g.createImageData(N, N), d = id.data;
+    let sd = 5; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < N * N; i++) { const k = 0.7 + n[i] * 0.5; d[i * 4] = 176 * k; d[i * 4 + 1] = 128 * k; d[i * 4 + 2] = 82 * k; d[i * 4 + 3] = 255; }
+    g.putImageData(id, 0, 0);
+    for (let i = 0; i < 9000; i++) { g.fillStyle = rnd() < 0.5 ? 'rgba(60,35,15,0.35)' : 'rgba(230,190,140,0.3)'; g.beginPath(); g.arc(rnd() * N, rnd() * N, 0.6 + rnd() * 2.2, 0, 7); g.fill(); }
+    return c;
+  }
+  if (kind === 'linen') {
+    const [r0, g0, b0] = rgb(color), n = fbm(N, 32, 3, 61, 0.5), id = g.createImageData(N, N), d = id.data;
+    for (let i = 0; i < N * N; i++) { const x = i % N, y = (i / N) | 0, w = 0.9 + 0.06 * Math.sin(x * 1.6) + 0.06 * Math.sin(y * 1.6 + n[i] * 3) + n[i] * 0.1; d[i * 4] = r0 * w; d[i * 4 + 1] = g0 * w; d[i * 4 + 2] = b0 * w; d[i * 4 + 3] = 255; }
+    g.putImageData(id, 0, 0); return c;
+  }
+  if (kind === 'walnut' || kind === 'oak' || kind === 'pine') {
+    const n = fbm(N, 4, 4, kind === 'oak' ? 3 : kind === 'pine' ? 7 : 5, 0.55), fine = fbm(N, 128, 2, 9);
     const id = g.createImageData(N, N), d = id.data;
-    const A = kind === 'oak' ? [196, 156, 106] : [74, 46, 30], B = kind === 'oak' ? [160, 118, 74] : [44, 26, 17];
+    const A = kind === 'oak' ? [196, 156, 106] : kind === 'pine' ? [226, 192, 140] : [74, 46, 30], B = kind === 'oak' ? [160, 118, 74] : kind === 'pine' ? [190, 140, 86] : [44, 26, 17];
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       const i = y * N + x, ring = 0.5 + 0.5 * Math.sin((y / N * 18 + n[i] * 6) * Math.PI * 2 / 2);
       const k = ring * 0.8 + fine[(y % N) * N + ((x * 7) % N)] * 0.2;
@@ -338,7 +370,7 @@ export function deskTile(kind, color = '#2a2420') {
     g.putImageData(id, 0, 0);
   } else if (kind === 'felt' || kind === 'concrete') {
     const n = fbm(N, kind === 'felt' ? 128 : 16, 4, 21, 0.6), id = g.createImageData(N, N), d = id.data;
-    const base = kind === 'felt' ? [28, 27, 27] : [128, 126, 122];
+    const base = kind === 'felt' ? (color && color !== '#2a2420' ? rgb(color) : [28, 27, 27]) : [128, 126, 122];
     for (let i = 0; i < N * N; i++) { const k = 0.8 + n[i] * 0.4; d[i * 4] = base[0] * k; d[i * 4 + 1] = base[1] * k; d[i * 4 + 2] = base[2] * k; d[i * 4 + 3] = 255; }
     g.putImageData(id, 0, 0);
   } else if (kind === 'cutmat') {

@@ -3,7 +3,7 @@
 import { db, uid, putBlob, getSetting, setSetting } from './db.js';
 import { PRESETS, PARAMS, ENGINES, TOOLS, TIP_SHAPES, shapePath, paramsFor, fullBrush, Stroke, watercolorFinish, floodFill, drawTool, mixPaint } from './brushes.js';
 import { colorWheel } from './colorwheel.js';
-import { drawLayer, drawLayers, drawPaper, bitmap, mediaRes, isAnimated, itemSize, makeThumb, canvasBlob, paperOf } from './render.js';
+import { drawLayer, drawLayers, drawPaper, bitmap, mediaRes, isAnimated, itemSize, makeThumb, canvasBlob, paperOf, motionSplit, motionSig } from './render.js';
 import { pushHistory } from './model.js';
 import { FX_PARAMS, FX_PRESETS, FX_DEFAULT } from './stickerfx.js';
 import { PAPERS } from './paper.js';
@@ -14,7 +14,9 @@ const BLENDS = { 'source-over': 'Normal', multiply: 'Multiply', screen: 'Screen'
 const PALETTE = ['#101012', '#3a3a3c', '#8a8a8a', '#f4f1ea', '#ffffff', '#7a0f12', '#b3211e', '#e0533d', '#ef8fa0', '#f2c94c', '#e8b23a', '#c9a46a', '#8a6a46', '#4c3a2a', '#5b6a3c', '#2f5d3a', '#2e8a7a', '#3b6ea8', '#1f2f55', '#7fa6c9', '#6b4a8a', '#c86aa0', '#d9d2c3', '#1b1a19'];
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 const clone = o => JSON.parse(JSON.stringify(o));
-const AUTOSAVE_MS = 5 * 60 * 1000; // a full save and a restore point every 5 minutes
+const AUTOSAVE_MS = 5 * 60 * 1000;
+// phones and tablets get less memory for undo; iPads report themselves as Macs with touch
+const LOW_MEM = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform || '')) || (navigator.deviceMemory && navigator.deviceMemory <= 4); // a full save and a restore point every 5 minutes
 const seededRnd = s => () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
 const TOOLS_UI = [
   ['brush', 'Draw', 'B', '✎', 'Draw and paint. Pick a brush on the right.'],
@@ -40,8 +42,8 @@ const KEYS = [
 export class Editor {
   constructor(app) { this.app = app; }
 
-  async open(book, pageIndex, pageId) {
-    this.book = book; this.idx = pageIndex; this.coverMode = !!pageId;
+  async open(book, pageIndex, pageId, label) {
+    this.book = book; this.idx = pageIndex; this.coverMode = !!pageId; this.partLabel = label || 'Cover art';
     this.page = await db.get('pages', pageId || book.pages[pageIndex]);
     this.res = {}; this.dirtyLayers = new Set(); this.undo = []; this.redo = [];
     this.tool = 'brush'; this.selection = new Set(); this.primary = null;
@@ -61,6 +63,7 @@ export class Editor {
     this.pickSize = await getSetting('pickSize', 1);
     this.pickStay = await getSetting('pickStay', false);
     this.dblMenu = await getSetting('dblMenu', true);
+    this.touchDraw = await getSetting('touchDraw', 'auto'); if (this.touchDraw === 'never') this.penSeen = true;
     this.fonts = [...SYSTEM_FONTS, ...(await loadAllFonts())];
     this.buildDOM();
     await this.loadPage();
@@ -94,7 +97,7 @@ export class Editor {
     this.pre = mk(P.w, P.h);
     this.activeId = (P.layers.slice().reverse().find(l => l.kind === 'paint') || P.layers[P.layers.length - 1] || {}).id;
     this.selection = new Set(); this.primary = null;
-    this.title.textContent = this.coverMode ? 'Cover art' : `Page ${this.idx + 1} of ${this.book.pages.length}`;
+    this.title.textContent = this.coverMode ? this.partLabel : `Page ${this.idx + 1} of ${this.book.pages.length}`;
     this.nameI.value = this.page.title || ''; this.nameI.style.display = this.coverMode ? 'none' : '';
     this.renderPanels(); this.updUndo();
     this.dirty = true;
@@ -106,6 +109,7 @@ export class Editor {
       if (L.blob) { const bm = await bitmap(L.blob); if (bm) c.getContext('2d').drawImage(bm, 0, 0); }
       this.res[L.id] = c;
     } else if (L.kind === 'image') this.res[L.id] = await mediaRes(L);
+    this.contentVer = (this.contentVer || 0) + 1;
   }
   layerCtx(L) { return this.res[L.id].getContext('2d'); }
 
@@ -158,6 +162,7 @@ export class Editor {
     this.root = el('div', { class: 'editor' },
       el('header', { class: 'ed-top' },
         el('button', { class: 'btn', onclick: () => this.close(), title: 'Save and go back to the book' }, '← Book'),
+        el('button', { class: 'btn panel-toggle', title: 'Show or hide brushes, colors and layers', onclick: () => { this.root.classList.toggle('panel-open'); setTimeout(() => this.resize(), 260); } }, '☰ Brushes'),
         el('button', { class: 'icon-btn', title: 'Previous page (Page Up)', onclick: () => this.gotoPage(this.idx - 1) }, '‹'), this.title, this.nameI,
         el('button', { class: 'icon-btn', title: 'Next page (Page Down)', onclick: () => this.gotoPage(this.idx + 1) }, '›'),
         el('span', { class: 'sep' }),
@@ -177,7 +182,8 @@ export class Editor {
     this.bindPointer();
     this.loop = () => {
       if (!this.root) return; requestAnimationFrame(this.loop);
-      if (this.hasAnim) this.dirty = true;
+      // moving media: redraw only when a GIF or video actually shows a new frame
+      if (this.hasAnim) { const sg = motionSig(this.page.layers, this.res); if (sg !== this.animSig) { this.animSig = sg; this.dirty = true; } }
       if (this.dirty) { this.dirty = false; this.draw(); }
     };
     requestAnimationFrame(this.loop);
@@ -221,8 +227,10 @@ export class Editor {
   }
   fit() {
     if (!this.vw) this.resize();
-    const P = this.page, z = Math.min((this.vw - 60) / P.w, (this.vh - 150) / P.h);
-    this.z = z; this.px = (this.vw - P.w * z) / 2; this.py = (this.vh - 90 - P.h * z) / 2 + 10; this.updZoom();
+    // leave room for the toolbar at the bottom (it is taller on phones)
+    const P = this.page, dockH = (this.dock?.offsetHeight || 60) + 24, side = this.vw < 500 ? 20 : 60;
+    const z = Math.min((this.vw - side) / P.w, (this.vh - dockH - 30) / P.h);
+    this.z = z; this.px = (this.vw - P.w * z) / 2; this.py = (this.vh - dockH - P.h * z) / 2 + 8; this.updZoom();
   }
   zoomTo(z, cx = this.vw / 2, cy = this.vh / 2) {
     z = Math.max(0.03, Math.min(16, z));
@@ -238,15 +246,19 @@ export class Editor {
     const g = this.canvas.getContext('2d'), dpr = devicePixelRatio || 1, P = this.page;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, this.vw, this.vh);
-    g.save();
-    g.shadowColor = 'rgba(0,0,0,0.45)'; g.shadowBlur = 30; g.shadowOffsetY = 10;
-    g.fillStyle = '#fff'; g.fillRect(this.px, this.py, P.w * this.z, P.h * this.z);
-    g.restore();
-    g.save();
-    g.translate(this.px, this.py); g.scale(this.z, this.z);
-    g.beginPath(); g.rect(0, 0, P.w, P.h); g.clip();
-    g.imageSmoothingEnabled = true; g.imageSmoothingQuality = this.z < 1 ? 'high' : 'medium';
-    g.drawImage(this.paperCanvas, 0, 0);
+    const split = this.hasAnim && !this.stroking && !this.pointerDown ? motionSplit(P.layers, this.res) : null;
+    const pageBase = (gg, layers, withPaper) => {
+      if (withPaper) {
+        gg.save(); gg.shadowColor = 'rgba(0,0,0,0.45)'; gg.shadowBlur = 30; gg.shadowOffsetY = 10;
+        gg.fillStyle = '#fff'; gg.fillRect(this.px, this.py, P.w * this.z, P.h * this.z); gg.restore();
+      }
+      gg.save(); gg.translate(this.px, this.py); gg.scale(this.z, this.z);
+      gg.beginPath(); gg.rect(0, 0, P.w, P.h); gg.clip();
+      gg.imageSmoothingEnabled = true; gg.imageSmoothingQuality = this.z < 1 ? 'high' : 'medium';
+      if (withPaper) gg.drawImage(this.paperCanvas, 0, 0);
+      drawLayers(gg, layers, this.res, this.z, P.w, P.h, layers === P.layers ? hook : null, Math.min(1, this.z * dpr));
+      gg.restore();
+    };
     const hook = (L, ctx, clipped) => {
       if (this.stroking && L.id === this.activeId && this.strokeOnCanvas) {
         ctx.save(); ctx.globalAlpha = this.preset.opacity; ctx.globalCompositeOperation = (clipped || L.alphaLock) ? 'source-atop' : (this.preset.blend || 'source-over');
@@ -254,8 +266,22 @@ export class Editor {
       }
     };
     this.renderTime = performance.now();
-    drawLayers(g, P.layers, this.res, this.z, P.w, P.h, hook, Math.min(1, this.z * dpr));
-    g.restore();
+    if (split) {
+      // still layers are drawn once into two screen-sized pictures; only the moving layers are drawn each frame
+      const key = [this.z, this.px, this.py, this.vw, this.vh, dpr, this.contentVer || 0, JSON.stringify(P.layers)].join('|');
+      if (key !== this.animKey) {
+        const mkC = () => { const c = document.createElement('canvas'); c.width = this.canvas.width; c.height = this.canvas.height; const cg = c.getContext('2d'); cg.setTransform(dpr, 0, 0, dpr, 0, 0); return [c, cg]; };
+        const [b, bg] = mkC(); pageBase(bg, P.layers.slice(0, split.a0), true);
+        const [a, ag] = mkC(); pageBase(ag, P.layers.slice(split.a1 + 1), false);
+        this.animBelow = b; this.animAbove = a; this.animKey = key;
+      }
+      g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(this.animBelow, 0, 0); g.restore();
+      pageBase(g, P.layers.slice(split.a0, split.a1 + 1), false);
+      g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(this.animAbove, 0, 0); g.restore();
+    } else {
+      this.animKey = null;
+      pageBase(g, P.layers, true);
+    }
     const picking = this.hover && this.pickMode() && !this.previewOn;
     if (picking) this.pickPreview = this.sampleAt(this.hover.sx, this.hover.sy);
     if (this.previewOn) return;
@@ -275,6 +301,12 @@ export class Editor {
       }
     }
     if (picking && this.pickPreview) this.drawLoupe(g, this.hover.sx, this.hover.sy);
+    // the stabilizer string, from the brush to your hand
+    if (this.stroking && this.ropeView) {
+      const r = this.ropeView, bx = this.px + r.x * this.z, by = this.py + r.y * this.z, tx = this.px + r.tx * this.z, ty = this.py + r.ty * this.z;
+      g.save(); g.setLineDash([3, 4]); g.lineWidth = 1.5; g.strokeStyle = 'rgba(224,83,61,0.85)'; g.beginPath(); g.moveTo(bx, by); g.lineTo(tx, ty); g.stroke();
+      g.setLineDash([]); g.fillStyle = '#e0533d'; g.beginPath(); g.arc(bx, by, 3, 0, 7); g.fill(); g.restore();
+    }
   }
   // the color under the cursor: from everything you see, or only the selected layer
   sampleAt(sx, sy) {
@@ -350,8 +382,32 @@ export class Editor {
   bindPointer() {
     const c = this.canvas;
     let pan = null, stroke = null, xf = null, lastMove = null, zoomDrag = null, picking = false, down = null;
+    const touches = new Map(); let gest = null;
+    // cancel a stroke that a second finger turned into a gesture: put the layer back how it was
+    const abortStroke = () => {
+      if (!stroke) return;
+      const L = stroke.L; this.stroking = false;
+      if (stroke.direct && this.res[L.id]) { const g = this.res[L.id].getContext('2d'); g.save(); g.globalCompositeOperation = 'copy'; g.drawImage(this.pre, 0, 0); g.restore(); }
+      this.strokeCtx.clearRect(0, 0, this.page.w, this.page.h);
+      stroke = null; this.dirty = true;
+    };
+    const gestInfo = () => { const pts = [...touches.values()], a = pts[0], b = pts[1] || a; return { mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) || 1 }; };
     c.addEventListener('pointerdown', e => {
+      this.pointerDown = true;
       try { c.setPointerCapture(e.pointerId); } catch (_) { }
+      if (e.pointerType === 'pen') this.penSeen = true;
+      if (this.root.classList.contains('panel-open') && innerWidth <= 900) { this.root.classList.remove('panel-open'); this.pointerDown = false; return; }
+      if (e.pointerType === 'touch') {
+        const rc0 = c.getBoundingClientRect(); touches.set(e.pointerId, { x: e.clientX - rc0.left, y: e.clientY - rc0.top });
+        // with a pen in use, fingers only move and zoom (palm rejection)
+        const fingersNavigate = this.penSeen && this.touchDraw !== 'always';
+        if (gest) { gest.n = Math.max(gest.n, touches.size); const gi = gestInfo(); Object.assign(gest, gi, { z: this.z, px: this.px, py: this.py }); return; }
+        if (touches.size >= 2 || fingersNavigate) {
+          abortStroke(); xf = null; this.marquee = null; picking = false; down = null; this.lastTap = null;
+          const gi = gestInfo(); gest = { ...gi, z: this.z, px: this.px, py: this.py, t: performance.now(), n: touches.size, moved: false };
+          return;
+        }
+      }
       const p = this.toPage(e), rc = c.getBoundingClientRect();
       if (e.button === 1 || this.tool === 'hand' || this.space) { pan = { x: e.clientX, y: e.clientY, px: this.px, py: this.py }; this.stage.style.cursor = 'grabbing'; return; }
       if (e.button !== 0) return; // the right button does nothing here, so no menus pop up
@@ -360,13 +416,25 @@ export class Editor {
       if (this.zDown) { zoomDrag = { x: e.clientX, sx: e.clientX - rc.left, sy: e.clientY - rc.top, z0: this.z, moved: false, out: e.altKey }; return; }
       // double-click (or double-tap) opens the quick menu; the dot the first click made is taken back
       const now = performance.now(), lt = this.lastTap;
-      if (this.dblMenu !== false && lt && now - lt.t < 420 && Math.hypot(e.clientX - lt.x, e.clientY - lt.y) < 12 && lt.type === e.pointerType && !['text', 'pick'].includes(lt.tool) && !this.pickMode()) {
+      // triple-click a sticker or text: open its look settings
+      const lg = this.lastGrab;
+      if (lg && now - lg.t < 500 && Math.hypot(e.clientX - lg.x, e.clientY - lg.y) < 14) { this.lastGrab = null; this.showLook(lg.id); return; }
+      if (lt && now - lt.t < 420 && Math.hypot(e.clientX - lt.x, e.clientY - lt.y) < 12 && lt.type === e.pointerType && !['text', 'pick'].includes(lt.tool) && !this.pickMode()) {
         this.lastTap = null; down = null;
         if (lt.entries.length && this.undo.length === lt.undoLen + lt.entries.length && this.undo[this.undo.length - 1] === lt.entries[lt.entries.length - 1]) {
           for (let i = lt.entries.length - 1; i >= 0; i--) { const en = this.undo.pop(); this.applyEntry(en, -1); if (en.before?.width) en.before.width = 0; if (en.after?.width) en.after.width = 0; }
           this.changed(); this.updUndo(); this.renderPanels();
         }
-        this.quickMenu(e.clientX, e.clientY); return;
+        // double-click a sticker, picture or text: pick it up to move and edit, with any tool
+        const item = this.hitItem(p, true);
+        if (item) {
+          this.setTool('move'); this.selectOnly(item.id);
+          this.lastGrab = { t: now, x: e.clientX, y: e.clientY, id: item.id };
+          toast(item.locked ? 'Picked. It is locked, unlock it in Layers to move it.' : 'Picked up. Drag to move, use the corners to resize. Click again to style it.');
+          return;
+        }
+        if (this.dblMenu !== false) this.quickMenu(e.clientX, e.clientY);
+        return;
       }
       down = { t: now, x: e.clientX, y: e.clientY, type: e.pointerType, undoLen: this.undo.length, tool: this.tool, far: false };
       this.closeQuick();
@@ -409,6 +477,17 @@ export class Editor {
     c.addEventListener('pointermove', e => {
       const r = c.getBoundingClientRect();
       const sx = e.clientX - r.left, sy = e.clientY - r.top;
+      if (e.pointerType === 'touch' && touches.has(e.pointerId)) {
+        touches.set(e.pointerId, { x: sx, y: sy });
+        if (gest) {
+          const gi = gestInfo(); if (Math.abs(gi.d - gest.d) > 8 || Math.hypot(gi.mx - gest.mx, gi.my - gest.my) > 8) gest.moved = true;
+          const k = touches.size >= 2 ? gi.d / gest.d : 1, z = Math.max(0.03, Math.min(16, gest.z * k));
+          // keep the point between the fingers under the fingers while zooming and moving
+          const ux = (gest.mx - gest.px) / gest.z, uy = (gest.my - gest.py) / gest.z;
+          this.z = z; this.px = gi.mx - ux * z; this.py = gi.my - uy * z; this.updZoom();
+          return;
+        }
+      }
       if (lastMove) { const vx = sx - lastMove.x; this.lean = (this.lean || 0) * 0.85 + Math.max(-0.25, Math.min(0.25, vx * 0.01)) * 0.15; }
       lastMove = { x: sx, y: sy }; this.lastInput = performance.now();
       this.hover = { sx, sy }; this.dirty = true;
@@ -428,6 +507,20 @@ export class Editor {
       }
     });
     const up = e => {
+      if (e.pointerType === 'touch') {
+        touches.delete(e.pointerId);
+        if (gest) {
+          if (!touches.size) {
+            // quick two-finger tap = undo, three-finger tap = redo
+            if (!gest.moved && performance.now() - gest.t < 300) { if (gest.n === 2) this.doUndo(); else if (gest.n >= 3) this.doRedo(); }
+            gest = null;
+          } else { const gi = gestInfo(); gest = { ...gest, ...gi, z: this.z, px: this.px, py: this.py }; }
+          this.pointerDown = touches.size > 0; this.dirty = true;
+          return;
+        }
+      }
+      if (gest && e.pointerType === 'touch') return;
+      this.pointerDown = false; this.contentVer = (this.contentVer || 0) + 1; this.dirty = true;
       if (zoomDrag) { if (!zoomDrag.moved) this.zoomBy(zoomDrag.out || e.altKey ? 0.5 : 2, zoomDrag.sx, zoomDrag.sy); zoomDrag = null; }
       if (picking) { picking = false; const rc = c.getBoundingClientRect(); this.hover = { sx: e.clientX - rc.left, sy: e.clientY - rc.top }; this.draw(); this.commitPick(); }
       if (pan) { pan = null; this.updCursor(); }
@@ -455,6 +548,7 @@ export class Editor {
       down = null;
     };
     c.addEventListener('pointerup', up); c.addEventListener('pointercancel', up);
+    c.addEventListener('pointerup', e => { if (e.pointerType === 'touch') { this.hover = null; this.dirty = true; } });
     c.addEventListener('pointerleave', () => { this.hover = null; this.dirty = true; });
     c.addEventListener('wheel', e => {
       e.preventDefault();
@@ -477,6 +571,14 @@ export class Editor {
       const id = e.dataTransfer.getData('application/x-shesketches-asset'); if (!id) return;
       e.preventDefault(); const a = await db.get('assets', id); if (a) this.addImageAsset(a, this.toPage(e));
     });
+  }
+  // open the side panel right at an item's look settings (sticker look for pictures)
+  showLook(id) {
+    if (this.tool !== 'move') this.setTool('move');
+    this.selectOnly(id);
+    this.root.classList.add('panel-open');
+    const sec = this.panel.querySelector('details.sec[data-k=item]'); if (sec) sec.open = true;
+    setTimeout(() => (this.panel.querySelector('.fx-presets') || sec)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 60);
   }
   selectOnly(id) { this.selection = new Set(id ? [id] : []); this.primary = id; if (id) this.activeId = id; this.renderPanels(); this.dirty = true; }
 
@@ -514,9 +616,23 @@ export class Editor {
   }
   strokeMove(st, e) {
     if (!st) return;
-    const p = this.toPage(e), b = this.preset;
+    let p = this.toPage(e); const b = this.preset;
     let pr = e.pointerType === 'mouse' ? 0.6 : (e.pressure || 0.5);
     if (e.pointerType === 'pen' && e.pressure === 0) return;
+    // stabilizer: the brush hangs on a string behind the pointer and only moves when the string is pulled tight
+    const stab = b.stabilize || 0;
+    if (stab > 0) {
+      const R = stab * 70 / this.z;
+      if (!st.rope) st.rope = { x: p.x, y: p.y };
+      else {
+        const dx = p.x - st.rope.x, dy = p.y - st.rope.y, d = Math.hypot(dx, dy);
+        this.ropeView = { ...st.rope, tx: p.x, ty: p.y }; this.dirty = true;
+        if (d <= R) return;
+        st.rope.x += dx * (1 - R / d); st.rope.y += dy * (1 - R / d);
+      }
+      p = { x: st.rope.x, y: st.rope.y };
+      this.ropeView = { ...st.rope, tx: this.toPage(e).x, ty: this.toPage(e).y };
+    }
     const k = Math.min(0.95, b.smooth || 0);
     st.sm = st.sm ? { x: st.sm.x + (p.x - st.sm.x) * (1 - k), y: st.sm.y + (p.y - st.sm.y) * (1 - k), p: st.sm.p + (pr - st.sm.p) * 0.5 } : { x: p.x, y: p.y, p: pr };
     st.s.add({ ...st.sm });
@@ -524,7 +640,7 @@ export class Editor {
   }
   endStroke(st) {
     if (!st) return;
-    this.stroking = false;
+    this.stroking = false; this.ropeView = null;
     const { s, L } = st, b = this.preset;
     const ctx = this.layerCtx(L);
     s.finish(ctx);
@@ -578,8 +694,8 @@ export class Editor {
   trimUndo() {
     const px = en => en.kind === 'paint' ? en.rect[2] * en.rect[3] * (en.after ? 2 : 1) : en.paint ? Object.values(en.paint.before).concat(Object.values(en.paint.after)).reduce((s, c) => s + c.width * c.height, 0) : 0;
     let total = this.undo.reduce((s, en) => s + px(en), 0);
-    const limit = 90e6; // about 360 MB of pixels
-    while ((this.undo.length > 100 || total > limit) && this.undo.length > 5) { const en = this.undo.shift(); total -= px(en); if (en.before?.width) en.before.width = 0; }
+    const limit = LOW_MEM ? 22e6 : 90e6; // about 360 MB of pixels (about 90 MB on phones and tablets)
+    while ((this.undo.length > (LOW_MEM ? 40 : 100) || total > limit) && this.undo.length > 5) { const en = this.undo.shift(); total -= px(en); if (en.before?.width) en.before.width = 0; }
   }
   pushState(before, label = 'Change') { this.undo.push({ kind: 'state', before, after: clone(this.page.layers), label }); this.dropRedo(); this.trimUndo(); this.updUndo(); }
   applyEntry(en, dir) {
@@ -594,7 +710,7 @@ export class Editor {
       if (en.paint) for (const [id, c] of Object.entries(dir < 0 ? en.paint.before : en.paint.after)) { const t = mk(c.width, c.height); t.getContext('2d').drawImage(c, 0, 0); this.res[id] = t; this.dirtyLayers.add(id); }
       if (!this.page.layers.find(l => l.id === this.activeId)) this.activeId = this.page.layers[this.page.layers.length - 1]?.id;
       for (const id of [...this.selection]) if (!this.page.layers.find(l => l.id === id)) this.selection.delete(id);
-      this.page.layers.forEach(l => this.ensureRes(l).then(() => this.dirty = true));
+      this.page.layers.forEach(l => this.ensureRes(l).then(() => { this.contentVer = (this.contentVer || 0) + 1; this.dirty = true; }));
     }
   }
   doUndo() { const en = this.undo.pop(); if (!en) return toast('Nothing to undo.'); this.applyEntry(en, -1); this.redo.push(en); this.changed(); this.renderPanels(); this.updUndo(); this.dirty = true; }
@@ -805,6 +921,7 @@ export class Editor {
     const keepScroll = this.panel.scrollTop;
     const openState = {}; this.panel.querySelectorAll('details.sec').forEach(d => openState[d.dataset.k] = d.open);
     this.panel.innerHTML = '';
+    this.panel.append(el('button', { class: 'btn panel-close', onclick: () => { this.root.classList.remove('panel-open'); } }, '✕ Close'));
     const sec = (k, title, ...kids) => el('details', { class: 'sec', 'data-k': k, open: openState[k] ?? !['history', 'mix'].includes(k) }, el('summary', {}, title), ...kids);
     this.sec = sec;
     const items = this.selItems;
@@ -918,6 +1035,7 @@ export class Editor {
     }
     if (this.tool === 'fill') out.push(slider('Fill tolerance', this.fillTol ?? 32, 0, 160, 1, v => this.fillTol = v));
     out.push(check('Show the tool on the page', this.showTool !== false, v => { this.showTool = v; this.dirty = true; }));
+    if (navigator.maxTouchPoints > 0) out.push(el('div', { class: 'param' }, select('Fingers', this.touchDraw || 'auto', { auto: 'Draw, until a pen is used', always: 'Always draw', never: 'Only move and zoom' }, v => { this.touchDraw = v; this.penSeen = v === 'never' ? true : v === 'always' ? false : this.penSeen; setSetting('touchDraw', v); }), this.explain ? el('div', { class: 'help' }, 'With a pen like Apple Pencil, fingers move and zoom so your palm never draws. Pinch to zoom, two-finger tap undoes, three-finger tap redoes.') : null));
     out.push(el('div', { class: 'row wrap' },
       el('button', { class: 'btn small', onclick: () => { delete this.overrides[p.id]; setSetting('brushOverrides', this.overrides); this.renderPanels(); } }, 'Reset to how it came'),
       el('button', { class: 'btn small primary', onclick: () => this.brushMaker(p, true) }, 'Save as my own brush')));
@@ -1180,10 +1298,12 @@ export class Editor {
       const presets = el('div', { class: 'fx-presets' });
       for (const [k, pr] of Object.entries(FX_PRESETS)) presets.append(el('button', { class: 'btn small', title: 'Apply the ' + pr.name + ' look', onclick: () => { const before = clone(this.page.layers); const { name, ...v } = pr; L.fx = k === 'plain' ? {} : { ...v }; this.pushState(before, 'Sticker look: ' + name); live(); this.renderPanels(); } }, pr.name));
       out.push(el('div', { class: 'grp-title' }, 'Sticker look'), el('p', { class: 'muted small' }, 'Pick a look, then change any setting below. The original picture is never changed.'), presets);
-      let g0 = '';
+      // settings fold by group so the list stays short
+      this.fxOpen ||= { Border: true };
+      let box = null;
       for (const d of FX_PARAMS) {
-        if (d.g !== g0) { out.push(el('div', { class: 'grp-title sub' }, d.g)); g0 = d.g; }
-        out.push(this.paramControl(null, { ...d, pct: d.pct ? 1 : 0 }, fx[d.k], (k, v) => setFx(k, d.k === 'border' ? v : v)));
+        if (!box || box.dataset.g !== d.g) { const g = d.g, det = el('details', { class: 'sub', 'data-g': g, open: !!this.fxOpen[g] }, el('summary', {}, g)); det.addEventListener('toggle', () => { this.fxOpen[g] = det.open; }); out.push(det); box = det; }
+        box.append(this.paramControl(null, { ...d, pct: d.pct ? 1 : 0 }, fx[d.k], (k, v) => setFx(k, v)));
       }
       out.push(el('div', { class: 'grp-title' }, 'Adjust'),
         slider('Brightness', f.b ?? 100, 0, 200, 1, v => { f.b = v; live(); }, v => v + '%'),
@@ -1247,6 +1367,7 @@ export class Editor {
     return out;
   }
   async repaper() {
+    this.contentVer = (this.contentVer || 0) + 1;
     await drawPaper(this.paperCanvas.getContext('2d'), this.page, this.book, this.page.w, this.page.h);
     this.renderPanels(); this.dirty = true;
   }
@@ -1362,6 +1483,7 @@ export class Editor {
     this.status.title = 'Your page saves by itself a few seconds after you stop drawing, and fully every 5 minutes. Ctrl+S saves now.';
   }
   changed(now) {
+    this.contentVer = (this.contentVer || 0) + 1;
     this.isChanged = true; this.editedSinceSnap = true; this.status.textContent = 'Not saved yet';
     clearTimeout(this.saveTimer);
     const tick = () => { if (this.stroking || (performance.now() - (this.lastInput || 0) < 1800)) { this.saveTimer = setTimeout(tick, 800); return; } this.save(); };
@@ -1400,7 +1522,7 @@ export class Editor {
   }
 
   async gotoPage(i) {
-    if (this.coverMode) return toast('You are drawing the cover. Go back to the book to draw on pages.');
+    if (this.coverMode) return toast(`You are drawing on the ${this.partLabel.toLowerCase()}. Go back to the book to draw on pages.`);
     if (i < 0 || i >= this.book.pages.length) return;
     await this.save();
     this.idx = i; this.page = await db.get('pages', this.book.pages[i]);

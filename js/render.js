@@ -32,7 +32,7 @@ export const isAnimated = r => !!(r && r.frames && r.frames.length > 1);
 export let mediaClock = null; // set to a time in ms to render a fixed moment (exports); null = live
 export function setMediaClock(t) { mediaClock = t; }
 async function decodeGif(blob) {
-  if (!('ImageDecoder' in window)) return null;
+  if (!('ImageDecoder' in window)) return decodeGifJS(blob);
   const dec = new ImageDecoder({ data: await blob.arrayBuffer(), type: blob.type || 'image/gif' });
   await dec.tracks.ready; const tr = dec.tracks.selectedTrack, n = Math.min(tr ? tr.frameCount : 1, 600);
   const frames = [], durs = [];
@@ -43,6 +43,62 @@ async function decodeGif(blob) {
   dec.close();
   let t = 0; const starts = durs.map(d => (t += d) - d);
   return { frames, durs, starts, total: t, width: frames[0].width, height: frames[0].height };
+}
+// A small GIF reader for browsers without ImageDecoder (Safari on iPhone and iPad).
+export async function decodeGifJS(blob) {
+  const b = new Uint8Array(await blob.arrayBuffer());
+  if (b.length < 13 || String.fromCharCode(b[0], b[1], b[2]) !== 'GIF') return null;
+  const W = b[6] | b[7] << 8, H = b[8] | b[9] << 8; let p = 13, gct = null;
+  const readCT = n => { const t = b.subarray(p, p + n * 3); p += n * 3; return t; };
+  if (b[10] & 0x80) gct = readCT(1 << ((b[10] & 7) + 1));
+  const screen = new Uint8ClampedArray(W * H * 4), frames = [], durs = [];
+  let delay = 100, trans = -1, disposal = 0, prev = null;
+  const subBlocks = () => { const parts = []; let len = 0; while (p < b.length) { const n = b[p++]; if (!n) break; parts.push(b.subarray(p, p + n)); len += n; p += n; } const out = new Uint8Array(len); let o = 0; for (const q of parts) { out.set(q, o); o += q.length; } return out; };
+  while (p < b.length && frames.length < 600) {
+    const tag = b[p++];
+    if (tag === 0x3B) break;
+    if (tag === 0x21) {
+      const lab = b[p++];
+      if (lab === 0xF9) { const n = b[p]; const pk = b[p + 1]; delay = (b[p + 2] | b[p + 3] << 8) * 10; trans = pk & 1 ? b[p + 4] : -1; disposal = (pk >> 2) & 7; p += n + 1; while (b[p]) p += b[p] + 1; p++; }
+      else subBlocks();
+      continue;
+    }
+    if (tag !== 0x2C) break;
+    const fx = b[p] | b[p + 1] << 8, fy = b[p + 2] | b[p + 3] << 8, fw = b[p + 4] | b[p + 5] << 8, fh = b[p + 6] | b[p + 7] << 8, pk = b[p + 8]; p += 9;
+    const ct = pk & 0x80 ? readCT(1 << ((pk & 7) + 1)) : gct, inter = !!(pk & 0x40);
+    const minCode = b[p++], data = subBlocks();
+    // LZW
+    const px = new Uint8Array(fw * fh); let clear = 1 << minCode, eoi = clear + 1, size = minCode + 1, next = eoi + 1, old = -1, bits = 0, cur = 0, out = 0, dp = 0;
+    const prefix = new Int16Array(4096), suffix = new Uint8Array(4096), stack = new Uint8Array(4097);
+    for (let i = 0; i < clear; i++) suffix[i] = i;
+    let first = 0;
+    while (out < px.length) {
+      while (bits < size && dp < data.length) { cur |= data[dp++] << bits; bits += 8; }
+      if (bits < size) break;
+      let code = cur & ((1 << size) - 1); cur >>= size; bits -= size;
+      if (code === clear) { size = minCode + 1; next = eoi + 1; old = -1; continue; }
+      if (code === eoi) break;
+      let sp = 0, c = code;
+      if (old < 0) { px[out++] = suffix[code]; first = suffix[code]; old = code; continue; }
+      if (code >= next) { stack[sp++] = first; c = old; }
+      while (c >= clear) { stack[sp++] = suffix[c]; c = prefix[c]; }
+      first = suffix[c]; stack[sp++] = first;
+      while (sp && out < px.length) px[out++] = stack[--sp];
+      if (next < 4096) { prefix[next] = old; suffix[next] = first; next++; if (next === 1 << size && size < 12) size++; }
+      old = code;
+    }
+    if (disposal === 3) prev = screen.slice();
+    // rows in display order (interlaced GIFs store them in 4 passes)
+    const rows = []; if (inter) { for (const [st, step] of [[0, 8], [4, 8], [2, 4], [1, 2]]) for (let y = st; y < fh; y += step) rows.push(y); } else for (let y = 0; y < fh; y++) rows.push(y);
+    for (let r = 0; r < fh; r++) { const y = rows[r] + fy; if (y >= H) continue; for (let x = 0; x < fw; x++) { const X = x + fx; if (X >= W) continue; const ci = px[r * fw + x]; if (ci === trans || !ct) continue; const o = (y * W + X) * 4; screen[o] = ct[ci * 3]; screen[o + 1] = ct[ci * 3 + 1]; screen[o + 2] = ct[ci * 3 + 2]; screen[o + 3] = 255; } }
+    frames.push(await createImageBitmap(new ImageData(screen.slice(), W, H))); durs.push(Math.max(20, delay || 100));
+    if (disposal === 2) { for (let y = fy; y < Math.min(H, fy + fh); y++) screen.fill(0, (y * W + fx) * 4, (y * W + Math.min(W, fx + fw)) * 4); }
+    else if (disposal === 3 && prev) screen.set(prev);
+    delay = 100; trans = -1; disposal = 0;
+  }
+  if (!frames.length) return null;
+  let t = 0; const starts = durs.map(d => (t += d) - d);
+  return { frames, durs, starts, total: t, width: W, height: H };
 }
 async function decodeVideo(blob) {
   const M = await import('../vendor/mediabunny.min.mjs');
@@ -68,12 +124,65 @@ export async function mediaRes(L) {
   mediaCache.set(L.src, p);
   return p;
 }
+// which frame of a GIF or video shows at a moment
+export function frameIndex(r, L, clock = mediaClock) {
+  if (!isAnimated(r)) return 0;
+  if (L.play === false || clock === 'still') return Math.min(r.frames.length - 1, L.still || 0);
+  const now = (clock ?? performance.now()) * (L.speed || 1), t = now % r.total;
+  let lo = 0, hi = r.starts.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (r.starts[m] <= t) lo = m; else hi = m - 1; }
+  return lo;
+}
 function frameOf(r, L) {
   if (!isAnimated(r)) return r && r.frames ? r.frames[0] : r;
-  if (L.play === false || mediaClock === 'still') return r.frames[Math.min(r.frames.length - 1, L.still || 0)];
-  const now = (mediaClock ?? performance.now()) * (L.speed || 1), t = now % r.total;
-  let lo = 0, hi = r.starts.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (r.starts[m] <= t) lo = m; else hi = m - 1; }
-  return r.frames[lo];
+  return r.frames[frameIndex(r, L)];
+}
+// The layers that move on a page, and whether the still layers can be drawn once and reused around them.
+// Returns { a0, a1 } (first and last moving layer) or null when a full redraw is needed.
+export function motionSplit(layers, res) {
+  let a0 = -1, a1 = -1;
+  layers.forEach((L, i) => { if (L.visible && L.kind === 'image' && L.play !== false && isAnimated(res[L.id])) { if (a0 < 0) a0 = i; a1 = i; } });
+  if (a0 < 0) return null;
+  if (layers[a0].clip || (layers[a1 + 1] && layers[a1 + 1].clip)) return null;
+  for (let i = a0; i <= a1; i++) if (layers[i].clip) return null;
+  for (let i = a1 + 1; i < layers.length; i++) if (layers[i].visible && ((layers[i].blend || 'source-over') !== 'source-over')) return null;
+  return { a0, a1 };
+}
+export function motionSig(layers, res, clock) {
+  let s = '';
+  for (const L of layers) if (L.visible && L.kind === 'image' && isAnimated(res[L.id])) s += frameIndex(res[L.id], L, clock) + ',';
+  return s;
+}
+
+// Renders a page with moving media fast: the paper and still layers are drawn once,
+// and only the moving layers are redrawn, and only when their frame changes.
+export async function motionRenderer(page, book, opts = {}) {
+  const S = opts.scale || 1, w = Math.max(1, Math.round(page.w * S)), h = Math.max(1, Math.round(page.h * S));
+  const res = await loadRes(page), split = motionSplit(page.layers, res);
+  const mk = () => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+  const out = mk(), og = out.getContext('2d');
+  let below = null, above = null, sig = null;
+  if (split) {
+    below = mk(); const bg = below.getContext('2d'); await drawPaper(bg, page, book, w, h);
+    const was = mediaClock; mediaClock = 'still';
+    try {
+      bg.save(); bg.scale(S, S); drawLayers(bg, page.layers.slice(0, split.a0), res, S, page.w, page.h, null, Math.min(1, S)); bg.restore();
+      above = mk(); const ag = above.getContext('2d'); ag.save(); ag.scale(S, S); drawLayers(ag, page.layers.slice(split.a1 + 1), res, S, page.w, page.h, null, Math.min(1, S)); ag.restore();
+    } finally { mediaClock = was; }
+  }
+  return {
+    canvas: out,
+    // returns true when the picture changed
+    async draw(time) {
+      const ns = motionSig(page.layers, res, time); if (ns === sig) return false; sig = ns;
+      if (!split) { await renderPage(page, book, { scale: S, res, time, canvas: out, pageNumber: opts.pageNumber }); return true; }
+      og.setTransform(1, 0, 0, 1, 0, 0); og.clearRect(0, 0, w, h); og.drawImage(below, 0, 0);
+      const was = mediaClock; mediaClock = time;
+      try { og.save(); og.scale(S, S); drawLayers(og, page.layers.slice(split.a0, split.a1 + 1), res, S, page.w, page.h, null, Math.min(1, S)); og.restore(); } finally { mediaClock = was; }
+      og.drawImage(above, 0, 0);
+      if (opts.pageNumber) drawPageNumber(og, page, book, w, h, opts.pageNumber);
+      return true;
+    },
+  };
 }
 export function stillFrame(r, L) { return r && r.frames ? r.frames[Math.min(r.frames.length - 1, L.still || 0)] : r; }
 

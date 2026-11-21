@@ -1,3 +1,4 @@
+import { FX_PRESETS, applyFx } from './stickerfx.js';
 // Sticker factory (cut things out of pictures) and the makers screen.
 import { getBlob } from './db.js';
 import { addAsset, assetGrid, importFiles } from './library.js';
@@ -87,13 +88,32 @@ export function composeSticker(src, mask, w, h, st) {
   const out = mk(W, H), g = out.getContext('2d');
   if (st.outline && st.width > 0) {
     const D = distanceField(big, W, H), id = g.createImageData(W, H), d = id.data;
-    const col = parseInt(st.color.slice(1), 16), R = col >> 16 & 255, G = col >> 8 & 255, B = col & 255;
+    const hex = c => { const n = parseInt(c.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+    const C1 = hex(st.color), C2 = hex(st.color2 || '#ff6ec7'), cx = W / 2, cy = H / 2, sw = st.width, lw = Math.max(1.5, sw * 0.09);
+    const hsl = hh => { const a = 0.36, f = n => { const k = (n + hh / 30) % 12; return Math.round(255 * (0.6 - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))); }; return [f(0), f(8), f(4)]; };
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const i = y * W + x; let r = st.width;
-      if (st.style === 'torn') r = st.width * (0.55 + 0.9 * vnoise(x / 26, y / 26, 3) + 0.35 * (vnoise(x / 4, y / 4, 9) - 0.5));
-      if (st.style === 'wavy') r = st.width * (0.8 + 0.4 * Math.sin((x + y) / 14));
+      const i = y * W + x, th = Math.atan2(y - cy, x - cx); let r = sw;
+      // the outer shape of the border
+      if (st.style === 'torn') r = sw * (0.55 + 0.9 * vnoise(x / 26, y / 26, 3) + 0.35 * (vnoise(x / 4, y / 4, 9) - 0.5));
+      else if (st.style === 'wavy') r = sw * (0.8 + 0.4 * Math.sin((x + y) / 14));
+      else if (st.style === 'scallop') r = sw * (0.55 + 0.55 * Math.abs(Math.sin(th * (st.bumps || 18))));
+      else if (st.style === 'zigzag') { const t = (th / Math.PI * (st.bumps || 18)) % 1; r = sw * (0.5 + 0.6 * Math.abs((t < 0 ? t + 1 : t) * 2 - 1)); }
+      else if (st.style === 'cloud') r = sw * (0.6 + 0.35 * Math.abs(Math.sin(th * (st.bumps || 9))) + 0.25 * vnoise(x / 40, y / 40, 5));
+      else if (st.style === 'glow') { const a = Math.max(0, 1 - D[i] / (sw * 1.6)); if (a > 0) { d[i * 4] = C1[0]; d[i * 4 + 1] = C1[1]; d[i * 4 + 2] = C1[2]; d[i * 4 + 3] = a * a * 230; } continue; }
       const a = Math.max(0, Math.min(1, r - D[i] + 0.5));
-      if (a > 0) { d[i * 4] = R; d[i * 4 + 1] = G; d[i * 4 + 2] = B; d[i * 4 + 3] = a * 255; }
+      if (a <= 0) continue;
+      let c = C1, al = a;
+      // how the border is colored
+      if (st.fill === 'rainbow') c = hsl(((th + Math.PI) / (2 * Math.PI)) * 360);
+      else if (st.fill === 'gradient') { const t = y / H; c = [C1[0] + (C2[0] - C1[0]) * t, C1[1] + (C2[1] - C1[1]) * t, C1[2] + (C2[2] - C1[2]) * t]; }
+      else if (st.fill === 'twotone' && D[i] > r * 0.6) c = C2;
+      else if (st.fill === 'double') { if (D[i] > r * 0.45 && D[i] < r * 0.7) { al = 0; } else if (D[i] >= r * 0.7) c = C2; }
+      // lines on the border: dashed cut line or stitches
+      if (st.line === 'dashed' && Math.abs(D[i] - r * 0.9) < lw && Math.floor((th + Math.PI) * (W + H) / 60) % 2 === 0) c = C2;
+      if (st.line === 'stitched' && Math.abs(D[i] - r * 0.5) < lw && Math.floor((th + Math.PI) * (W + H) / 45) % 2 === 0) c = C2;
+      if (st.line === 'outline' && D[i] > r - lw * 1.4) c = C2;
+      if (al <= 0) continue;
+      d[i * 4] = c[0]; d[i * 4 + 1] = c[1]; d[i * 4 + 2] = c[2]; d[i * 4 + 3] = al * 255;
     }
     g.putImageData(id, 0, 0);
     if (st.style === 'torn' || st.paperTex) { // paper fibers on the border
@@ -129,7 +149,7 @@ export async function openFactory(source, onSaved) {
   const m = modal('Sticker factory', body, { wide: true, cls: 'xl' });
   let img = null, w = 0, h = 0, orig = null, mask = null, undo = [];
   let tool = 'remove', brush = 40, tol = 40;
-  const st = { outline: true, style: 'diecut', width: 18, color: '#ffffff', gloss: false, print: false, paperTex: false };
+  const st = { outline: true, style: 'diecut', width: 18, color: '#ffffff', color2: '#ff6ec7', fill: 'solid', line: 'none', bumps: 18, gloss: false, print: false, paperTex: false, look: null };
   const src = mk(1, 1);
 
   const load = async (blob, name) => {
@@ -149,7 +169,7 @@ export async function openFactory(source, onSaved) {
   const draw = () => {
     if (!img) { view.width = 600; view.height = 400; const g = view.getContext('2d'); g.fillStyle = '#888'; g.font = '18px sans-serif'; g.fillText('Pick a picture to start.', 190, 200); return; }
     // working view: masked image (fast); final style shown when outline is on
-    const out = st.outline || st.gloss || st.print ? preview() : null; lastOut = out;
+    const out = st.outline || st.gloss || st.print || st.look ? withLook(preview()) : null; lastOut = out;
     const showW = out ? out.width : w, showH = out ? out.height : h;
     view.width = showW; view.height = showH;
     const g = view.getContext('2d');
@@ -214,20 +234,28 @@ export async function openFactory(source, onSaved) {
         el('button', { class: 'btn small', onclick: () => { if (!img) return; snap(); for (let i = 0; i < w * h; i++) mask[i] = orig[i * 4 + 3]; redraw(); } }, 'Start over')),
       el('h3', {}, '2. Style it'),
       check('Outline', st.outline, v => { st.outline = v; redraw(); }),
-      select('Outline style', st.style, { diecut: 'Die-cut (smooth)', torn: 'Torn paper', wavy: 'Wavy' }, v => { st.style = v; if (v === 'torn' && st.color === '#ffffff') st.color = '#efe6d2'; renderSide(); redraw(); }),
+      select('Outline shape', st.style, { diecut: 'Die-cut (smooth)', torn: 'Torn paper', wavy: 'Wavy', scallop: 'Scalloped', zigzag: 'Zigzag', cloud: 'Cloud', glow: 'Soft glow' }, v => { st.style = v; if (v === 'torn' && st.color === '#ffffff') st.color = '#efe6d2'; renderSide(); redraw(); }),
+      ['scallop', 'zigzag', 'cloud'].includes(st.style) ? slider('Bumps', st.bumps, 4, 60, 1, v => { st.bumps = v; redraw(); }) : null,
       slider('Outline width', st.width, 1, 120, 1, v => { st.width = v; redraw(); }),
+      select('Outline color style', st.fill, { solid: 'One color', twotone: 'Two colors', double: 'Double outline', gradient: 'Fade', rainbow: 'Rainbow' }, v => { st.fill = v; redraw(); }),
       colorInput('Outline color', st.color, v => { st.color = v; redraw(); }),
+      colorInput('Second color', st.color2, v => { st.color2 = v; redraw(); }),
+      select('Line on the outline', st.line, { none: 'None', outline: 'Thin outer line', dashed: 'Cut line (dashed)', stitched: 'Stitches' }, v => { st.line = v; redraw(); }),
       check('Paper texture on the outline', st.paperTex, v => { st.paperTex = v; redraw(); }),
       check('Glossy shine', st.gloss, v => { st.gloss = v; redraw(); }),
       check('Printed-on-paper look', st.print, v => { st.print = v; redraw(); }),
+      el('h3', {}, 'Look (baked in)'),
+      el('p', { class: 'muted small' }, 'Add a finish to the saved sticker. You can still add more looks later on the page.'),
+      el('div', { class: 'fx-presets' }, ...Object.entries(FX_PRESETS).map(([k, pr]) => el('button', { class: 'btn small' + ((st.look ? st.lookKey : 'plain') === k ? ' lit' : ''), onclick: () => { const { name, ...v } = pr; st.look = k === 'plain' ? null : v; st.lookKey = k; renderSide(); redraw(); } }, pr.name))),
       el('h3', {}, '3. Save'),
       el('div', { class: 'row wrap' },
         el('button', { class: 'btn primary', onclick: () => save('sticker') }, 'Save as sticker'),
         el('button', { class: 'btn', onclick: () => save('art') }, 'Save as cut-out art')));
   };
+  const withLook = c => { if (!st.look) return c; const r = applyFx(c, st.look, 'factory'); return r.canvas; };
   const save = async kind => {
     if (!img) return toast('Pick a picture first.');
-    const out = preview();
+    const out = withLook(preview());
     const blob = await canvasBlob(out, 'image/png');
     const a = await addAsset(blob, kind, img.name + (kind === 'sticker' ? ' sticker' : ' cut-out'), out.width, out.height);
     toast('Saved to your library.');

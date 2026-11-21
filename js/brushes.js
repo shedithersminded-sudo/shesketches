@@ -46,6 +46,7 @@ export const PARAMS = [
   { k: 'size', short: 'Size', g: 'Basics', label: 'Size', min: 1, max: 600, step: 0.5, unit: 'px', help: 'How wide the brush is.', engines: '*' },
   { k: 'opacity', short: 'Strength', g: 'Basics', label: 'Strength', min: 0.02, max: 1, step: 0.01, pct: 1, help: 'How dark or solid the mark can get. Lower it for light, see-through layers.', engines: '*' },
   { k: 'flow', short: 'Flow', g: 'Basics', label: 'Flow', min: 0.01, max: 1, step: 0.01, pct: 1, help: 'How much color each touch adds. Low flow builds up slowly.', engines: '*' },
+  { k: 'stabilize', short: 'Stabilizer', g: 'Basics', label: 'Stabilizer (pulled string)', min: 0, max: 1, step: 0.01, pct: 1, help: 'The brush follows your hand on a string, so shaky hands make smooth lines. Higher is steadier.', engines: '*' },
   { k: 'min', short: 'Light press', g: 'Pen pressure', label: 'Lightest press size', min: 0, max: 1, step: 0.01, pct: 1, help: 'Size when you press lightly. 100% means pressure does not change the size.', engines: '*' },
   { k: 'pOpacity', short: 'Press = darker', g: 'Pen pressure', label: 'Pressure to strength', min: 0, max: 1, step: 0.01, pct: 1, help: 'How much pressing harder makes the mark darker.', engines: '*' },
   { k: 'smooth', short: 'Steady line', g: 'Pen pressure', label: 'Smoothing', min: 0, max: 0.95, step: 0.01, pct: 1, help: 'Steadies shaky lines. High values trail a bit behind your hand.', engines: '*' },
@@ -163,7 +164,7 @@ export const PRESETS = [
   { id: 'texture-eraser', kind: 'erase', name: 'Texture eraser', tool: 'eraser', engine: 'erase', tip: 'sponge', size: 50, min: 0.7, opacity: 0.8, flow: 0.6, hard: 0.6, spacing: 0.15, grain: 0.6, smooth: 0.25, desc: 'Lifts color in a broken, textured way.' },
 ];
 // defaults any brush falls back on
-export const DEFAULTS = { kind: D, tool: 'brush', engine: 'stamp', tip: 'round', size: 20, min: 0.5, opacity: 1, pOpacity: 0.5, flow: 0.8, hard: 0.6, spacing: 0.08, round: 1, angle: 0, follow: false, bristles: 24, dry: 0, jitter: 0, scatter: 0, grain: 0, wax: 0, dust: 0, load: 0.6, pickup: 0.2, drag: 0.5, wet: 0, lift: 0, soften: 0, mixMode: 'paint', sampleAll: true, impasto: 0, wetEdge: 0.7, blend: 'source-over', smooth: 0.3 };
+export const DEFAULTS = { kind: D, tool: 'brush', engine: 'stamp', tip: 'round', size: 20, min: 0.5, opacity: 1, pOpacity: 0.5, flow: 0.8, hard: 0.6, spacing: 0.08, round: 1, angle: 0, follow: false, bristles: 24, dry: 0, jitter: 0, scatter: 0, grain: 0, wax: 0, dust: 0, load: 0.6, pickup: 0.2, drag: 0.5, wet: 0, lift: 0, soften: 0, mixMode: 'paint', sampleAll: true, impasto: 0, wetEdge: 0.7, blend: 'source-over', smooth: 0.3, stabilize: 0 };
 export const fullBrush = p => ({ ...DEFAULTS, ...p });
 
 const noise1 = x => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f), h = n => { let v = Math.imul(n | 0, 374761393) ^ 0x5bd1e995; v = Math.imul(v ^ (v >>> 13), 1274126177); return ((v ^ (v >>> 16)) >>> 0) / 4294967296; }; return h(i) + (h(i + 1) - h(i)) * u; };
