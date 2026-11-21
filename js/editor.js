@@ -4,9 +4,10 @@ import { db, uid, putBlob, getSetting, setSetting } from './db.js';
 import { PRESETS, PARAMS, ENGINES, TOOLS, paramsFor, fullBrush, Stroke, watercolorFinish, floodFill, drawTool, mixPaint } from './brushes.js';
 import { drawLayer, drawLayers, drawPaper, bitmap, mediaRes, isAnimated, itemSize, makeThumb, canvasBlob, paperOf } from './render.js';
 import { pushHistory } from './model.js';
+import { FX_PARAMS, FX_PRESETS, FX_DEFAULT } from './stickerfx.js';
 import { PAPERS } from './paper.js';
 import { el, toast, slider, select, colorInput, check, pickFiles, confirmBox, promptBox, modal, saveFile } from './ui.js';
-import { importFiles, assetGrid, KINDS, SYSTEM_FONTS, loadAllFonts, MEDIA_ACCEPT } from './library.js';
+import { importFiles, assetGrid, pieceTray, KINDS, SYSTEM_FONTS, loadAllFonts, MEDIA_ACCEPT } from './library.js';
 
 const BLENDS = { 'source-over': 'Normal', multiply: 'Multiply', screen: 'Screen', overlay: 'Overlay', darken: 'Darken', lighten: 'Lighten', 'color-dodge': 'Color dodge', 'color-burn': 'Color burn', 'hard-light': 'Hard light', 'soft-light': 'Soft light', difference: 'Difference', exclusion: 'Exclusion', hue: 'Hue', saturation: 'Saturation', color: 'Color', luminosity: 'Luminosity' };
 const PALETTE = ['#101012', '#3a3a3c', '#8a8a8a', '#f4f1ea', '#ffffff', '#7a0f12', '#b3211e', '#e0533d', '#ef8fa0', '#f2c94c', '#e8b23a', '#c9a46a', '#8a6a46', '#4c3a2a', '#5b6a3c', '#2f5d3a', '#2e8a7a', '#3b6ea8', '#1f2f55', '#7fa6c9', '#6b4a8a', '#c86aa0', '#d9d2c3', '#1b1a19'];
@@ -29,7 +30,8 @@ const KEYS = [
   ['Ctrl + Shift + N', 'New layer'], ['Ctrl + J', 'Duplicate layer'], ['Ctrl + E', 'Merge down'], ['Ctrl + ]  and  Ctrl + [', 'Move layer up / down'],
   ['/', 'Protect transparent areas on this layer'], ['Ctrl + Alt + G', 'Clip layer to the one below'], ['Ctrl + ,', 'Hide or show layer'],
   ['Ctrl + A', 'Select all pictures and text'], ['Delete', 'Delete what is selected'], ['Esc', 'Deselect'], ['Arrow keys', 'Nudge selected items (Shift for 10 px)'],
-  ['P', 'Preview: hide all tools'], ['0', 'Fit page'], ['+  and  -', 'Zoom'], ['Page Up / Page Down', 'Previous / next page'], ['?', 'This list'],
+  ['Right-click (or hold right button)', 'Quick menu: every brush setting, tools, colors, undo'], ['Q', 'Quick menu at the cursor'], ['Right-drag', 'Move around the page'], ['Alt + scroll', 'Brush size'], ['Alt + Shift + scroll', 'Brush strength'],
+  ['K', 'Stickers tray (drag stickers onto the page)'], ['P', 'Preview: hide all tools'], ['0', 'Fit page'], ['+  and  -', 'Zoom'], ['Page Up / Page Down', 'Previous / next page'], ['?', 'This list'],
 ];
 
 export class Editor {
@@ -50,6 +52,7 @@ export class Editor {
     this.recent = await getSetting('recentColors', []);
     this.myPalette = await getSetting('myPalette', []);
     this.explain = await getSetting('explainSettings', true);
+    this.recentBrushes = await getSetting('recentBrushes', []);
     this.moveMode = 'items';
     this.fonts = [...SYSTEM_FONTS, ...(await loadAllFonts())];
     this.buildDOM();
@@ -61,7 +64,8 @@ export class Editor {
 
   get brushes() { return [...PRESETS, ...this.custom]; }
   get curId() { return this.tool === 'blend' ? this.blendId : this.tool === 'eraser' ? this.eraseId : this.presetId; }
-  set curId(v) { if (this.tool === 'blend') { this.blendId = v; setSetting('blendPreset', v); } else if (this.tool === 'eraser') { this.eraseId = v; setSetting('erasePreset', v); } else { this.presetId = v; setSetting('brushPreset', v); } }
+  noteBrush(v) { this.recentBrushes = [v, ...(this.recentBrushes || []).filter(x => x !== v)].slice(0, 8); setSetting('recentBrushes', this.recentBrushes); }
+  set curId(v) { this.noteBrush(v); if (this.tool === 'blend') { this.blendId = v; setSetting('blendPreset', v); } else if (this.tool === 'eraser') { this.eraseId = v; setSetting('erasePreset', v); } else { this.presetId = v; setSetting('brushPreset', v); } }
   get preset() { const all = this.brushes, p = all.find(p => p.id === this.curId) || all.find(p => p.kind === this.kindForTool) || PRESETS[0]; return fullBrush({ ...p, ...(this.overrides[p.id] || {}) }); }
   get kindForTool() { return this.tool === 'blend' ? 'blend' : this.tool === 'eraser' ? 'erase' : 'draw'; }
   get active() { return this.page.layers.find(l => l.id === this.activeId); }
@@ -104,10 +108,10 @@ export class Editor {
     this.chip2 = el('button', { class: 'color-chip two', title: 'Second color. Click to swap (X).', onclick: () => this.swapColors() });
     this.sizeS = el('input', { type: 'range', min: 1, max: 600, step: 0.5, 'aria-label': 'Brush size' });
     this.sizeS.addEventListener('input', () => this.setBrushProp('size', +this.sizeS.value, true));
-    this.sizeS.addEventListener('change', () => this.renderPanels());
+    this.sizeS.addEventListener('change', () => { this.sizeS.blur(); this.renderPanels(); });
     this.opS = el('input', { type: 'range', min: 0.02, max: 1, step: 0.01, 'aria-label': 'Brush strength' });
     this.opS.addEventListener('input', () => this.setBrushProp('opacity', +this.opS.value, true));
-    this.opS.addEventListener('change', () => this.renderPanels());
+    this.opS.addEventListener('change', () => { this.opS.blur(); this.renderPanels(); });
     this.toolHint = el('div', { class: 'tool-hint' });
     const toolBtn = ([id, label, key, icon, help]) => el('button', { class: 'dock-btn tool', 'data-tool': id, title: `${label} (${key}). ${help}`, 'aria-label': label, onclick: () => this.setTool(id) }, el('span', { class: 'ti' }, icon), el('span', { class: 'tl' }, label));
     this.dock = el('div', { class: 'dock', role: 'toolbar', 'aria-label': 'Tools' },
@@ -117,13 +121,18 @@ export class Editor {
       el('span', { class: 'dock-sep' }),
       el('div', { class: 'dock-group sliders' },
         el('label', { class: 'mini', title: 'Brush size ([ and ])' }, el('span', {}, 'Size'), this.sizeS),
-        el('label', { class: 'mini', title: 'Brush strength (Shift + [ and ])' }, el('span', {}, 'Strength'), this.opS)),
+        el('label', { class: 'mini', title: 'Brush strength (Shift + [ and ])' }, el('span', {}, 'Strength'), this.opS),
+        this.mixWrap = el('label', { class: 'mini', title: 'How much the brush picks up and blends the colors under it' }, el('span', {}, 'Mix'), this.mixS = el('input', { type: 'range', min: 0, max: 1, step: 0.01, 'aria-label': 'Mix' })),
+        el('button', { class: 'dock-btn', title: 'Quick menu with every setting (right-click or Q)', onclick: e => { const r = e.currentTarget.getBoundingClientRect(); this.quickMenu(r.left + r.width / 2, r.top - 330); } }, el('span', { class: 'ti' }, '⚙'), el('span', { class: 'tl' }, 'Quick'))),
       el('div', { class: 'chips' }, this.chip, this.chip2),
       el('span', { class: 'dock-sep' }),
       el('div', { class: 'dock-group' },
+        el('button', { class: 'dock-btn', title: 'Stickers tray: drag stickers and pieces onto the page (K)', onclick: () => this.toggleTray() }, el('span', { class: 'ti' }, '★'), el('span', { class: 'tl' }, 'Stickers')),
         el('button', { class: 'dock-btn', title: 'Preview without tools (P)', onclick: () => this.togglePreview() }, el('span', { class: 'ti' }, '◐'), el('span', { class: 'tl' }, 'Preview')),
         el('button', { class: 'dock-btn', title: 'Keys and controls (?)', onclick: () => this.showKeys() }, el('span', { class: 'ti' }, '⌨'), el('span', { class: 'tl' }, 'Keys')),
         el('button', { class: 'dock-btn', title: 'Quick tips', onclick: () => this.showTips() }, el('span', { class: 'ti' }, '?'), el('span', { class: 'tl' }, 'Help'))));
+    this.mixS.addEventListener('input', () => this.setBrushProp('pickup', +this.mixS.value, true));
+    this.mixS.addEventListener('change', () => { this.mixS.blur(); this.renderPanels(); });
     this.previewExit = el('button', { class: 'btn preview-exit', onclick: () => this.togglePreview(false) }, 'Exit preview (P)');
     this.stage = el('div', { class: 'ed-stage' }, this.canvas, this.toolHint, this.dock, this.previewExit);
     this.panel = el('div', { class: 'ed-panel' });
@@ -170,6 +179,7 @@ export class Editor {
   updDock() {
     const p = this.preset;
     this.sizeS.value = p.size; this.opS.value = p.opacity;
+    if (this.mixS) { this.mixWrap.style.display = p.engine === 'paint' ? '' : 'none'; this.mixS.value = p.pickup ?? 0; }
     this.chip.style.background = this.color; this.chip2.style.background = this.color2;
   }
   updUndo() { this.undoBtn.disabled = !this.undo.length; this.redoBtn.disabled = !this.redo.length; this.undoBtn.title = this.undo.length ? `Undo: ${this.undo[this.undo.length - 1].label || 'last step'} (Ctrl+Z)` : 'Nothing to undo'; this.redoBtn.title = this.redo.length ? `Redo: ${this.redo[this.redo.length - 1].label || 'step'} (Ctrl+Y)` : 'Nothing to redo'; }
@@ -222,6 +232,7 @@ export class Editor {
     if (this.previewOn) return;
     for (const id of this.selection) { const L = P.layers.find(l => l.id === id); if (L && L.kind !== 'paint') this.drawHandles(g, L, id === this.primary && this.selection.size === 1); }
     if (this.marquee) { const m = this.marquee; g.save(); g.strokeStyle = '#e0533d'; g.setLineDash([4, 3]); g.fillStyle = 'rgba(224,83,61,0.08)'; const x = Math.min(m.x0, m.x1), y = Math.min(m.y0, m.y1); g.fillRect(x, y, Math.abs(m.x1 - m.x0), Math.abs(m.y1 - m.y0)); g.strokeRect(x, y, Math.abs(m.x1 - m.x0), Math.abs(m.y1 - m.y0)); g.restore(); }
+    if (!this.hover && this.sizeFlash && performance.now() - this.sizeFlash < 650) { const r = this.preset.size / 2 * this.z; g.save(); g.strokeStyle = 'rgba(255,255,255,0.85)'; g.lineWidth = 1.5; g.beginPath(); g.arc(this.vw / 2, this.vh / 2, Math.max(2, r), 0, 7); g.stroke(); g.strokeStyle = 'rgba(0,0,0,0.5)'; g.beginPath(); g.arc(this.vw / 2, this.vh / 2, Math.max(2, r) + 1.5, 0, 7); g.stroke(); g.restore(); }
     if (this.hover && ['brush', 'eraser', 'blend'].includes(this.tool)) {
       const b = this.preset, r = b.size / 2 * this.z, h = this.hover;
       g.save(); g.strokeStyle = 'rgba(0,0,0,0.5)'; g.lineWidth = 1; g.beginPath(); g.arc(h.sx, h.sy, Math.max(1.5, r), 0, 7); g.stroke();
@@ -273,7 +284,14 @@ export class Editor {
       try { c.setPointerCapture(e.pointerId); } catch (_) { }
       const p = this.toPage(e);
       if (e.button === 1 || this.tool === 'hand' || this.space) { pan = { x: e.clientX, y: e.clientY, px: this.px, py: this.py }; this.stage.style.cursor = 'grabbing'; return; }
+      if (e.button === 2) {
+        // right button: quick click or hold = quick menu, drag = move around the page
+        pan = { x: e.clientX, y: e.clientY, px: this.px, py: this.py, right: true, moved: false };
+        clearTimeout(this.holdT); this.holdT = setTimeout(() => { if (pan && pan.right && !pan.moved) { pan = null; this.quickMenu(e.clientX, e.clientY); } }, 320);
+        return;
+      }
       if (e.button !== 0) return;
+      this.closeQuick();
       if (e.altKey && ['brush', 'blend', 'fill'].includes(this.tool)) { this.pickColor(e, true); return; }
       if (['brush', 'eraser', 'blend'].includes(this.tool)) { stroke = this.beginStroke(e, p); return; }
       if (this.tool === 'pick') { this.pickColor(e); return; }
@@ -315,9 +333,9 @@ export class Editor {
       const r = c.getBoundingClientRect();
       const sx = e.clientX - r.left, sy = e.clientY - r.top;
       if (lastMove) { const vx = sx - lastMove.x; this.lean = (this.lean || 0) * 0.85 + Math.max(-0.25, Math.min(0.25, vx * 0.01)) * 0.15; }
-      lastMove = { x: sx, y: sy };
+      lastMove = { x: sx, y: sy }; this.lastInput = performance.now();
       this.hover = { sx, sy }; this.dirty = true;
-      if (pan) { this.px = pan.px + e.clientX - pan.x; this.py = pan.py + e.clientY - pan.y; return; }
+      if (pan) { if (pan.right && !pan.moved && Math.hypot(e.clientX - pan.x, e.clientY - pan.y) < 6) return; if (pan.right && !pan.moved) { pan.moved = true; this.stage.style.cursor = 'grabbing'; } this.px = pan.px + e.clientX - pan.x; this.py = pan.py + e.clientY - pan.y; return; }
       if (stroke) { let evs = e.getCoalescedEvents ? e.getCoalescedEvents() : []; if (!evs.length) evs = [e]; for (const ev of evs) this.strokeMove(stroke, ev); return; }
       if (this.marquee) { this.marquee.x1 = sx; this.marquee.y1 = sy; return; }
       if (xf) {
@@ -329,7 +347,8 @@ export class Editor {
       }
     });
     const up = e => {
-      if (pan) { pan = null; this.setTool(this.tool); }
+      clearTimeout(this.holdT);
+      if (pan) { const quick = pan.right && !pan.moved; pan = null; this.setTool(this.tool); if (quick) this.quickMenu(e.clientX, e.clientY); }
       if (stroke) { this.endStroke(stroke); stroke = null; }
       if (this.marquee) {
         const m = this.marquee; this.marquee = null;
@@ -353,10 +372,24 @@ export class Editor {
     c.addEventListener('wheel', e => {
       e.preventDefault();
       const r = c.getBoundingClientRect();
+      if (e.altKey) { // quick resize: Alt + scroll is size, Alt + Shift + scroll is strength
+        const p = this.preset, up = (e.deltaY || e.deltaX) < 0;
+        if (e.shiftKey) this.setBrushProp('opacity', Math.max(0.02, Math.min(1, p.opacity + (up ? 0.04 : -0.04))), true);
+        else this.setBrushProp('size', Math.max(1, Math.min(600, p.size * (up ? 1.1 : 1 / 1.1))), true);
+        this.updDock(); this.flashSize(); clearTimeout(this.rpT); this.rpT = setTimeout(() => this.renderPanels(), 500); return;
+      }
       if (e.shiftKey) { this.px -= e.deltaY; this.dirty = true; return; }
       this.zoomBy(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top);
     }, { passive: false });
     c.addEventListener('contextmenu', e => e.preventDefault());
+    // drop stickers from the tray right where you want them
+    this.stage.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('application/x-shesketches-asset')) { e.preventDefault(); this.stage.classList.add('drop-on'); } });
+    this.stage.addEventListener('dragleave', () => this.stage.classList.remove('drop-on'));
+    this.stage.addEventListener('drop', async e => {
+      this.stage.classList.remove('drop-on');
+      const id = e.dataTransfer.getData('application/x-shesketches-asset'); if (!id) return;
+      e.preventDefault(); const a = await db.get('assets', id); if (a) this.addImageAsset(a, this.toPage(e));
+    });
   }
   selectOnly(id) { this.selection = new Set(id ? [id] : []); this.primary = id; if (id) this.activeId = id; this.renderPanels(); this.dirty = true; }
 
@@ -372,20 +405,21 @@ export class Editor {
     const direct = b.engine === 'erase' || b.engine === 'paint';
     this.strokeCtx.clearRect(0, 0, this.page.w, this.page.h);
     this.strokeOnCanvas = !direct;
-    let below = null;
+    // what the paint brush mixes with: this layer as it was before the stroke, plus (by default) everything under it
+    let sampleSrc = this.pre;
     if (b.engine === 'paint' && b.sampleAll !== false) {
-      // everything under this layer, so paint and blenders mix with what you see
       const i = this.page.layers.indexOf(L);
       if (i > 0) {
         this.belowC ||= mk(this.page.w, this.page.h);
         const bg = this.belowC.getContext('2d'); bg.clearRect(0, 0, this.page.w, this.page.h);
         drawLayers(bg, this.page.layers.slice(0, i), this.res, 1, this.page.w, this.page.h);
-        below = this.belowC;
+        bg.drawImage(this.pre, 0, 0);
+        sampleSrc = this.belowC;
       }
     }
     const paper = paperOf(this.page, this.book).type;
     const color = b.kind === 'blend' ? '#808080' : this.color;
-    const s = new Stroke(b, direct ? ctx : this.strokeCtx, { color, paper: paper === 'custom' ? 'sketch' : paper, layerCtx: ctx, sampleSrc: this.pre, below, heightCtx: this.strokeCtx, alphaLock: !!L.alphaLock, grainScale: Math.max(0.5, Math.min(this.page.w, this.page.h) / 1700) });
+    const s = new Stroke(b, direct ? ctx : this.strokeCtx, { color, paper: paper === 'custom' ? 'sketch' : paper, layerCtx: ctx, sampleSrc, heightCtx: this.strokeCtx, alphaLock: !!L.alphaLock, grainScale: Math.max(0.5, Math.min(this.page.w, this.page.h) / 1700) });
     this.stroking = true;
     const st = { s, L, sm: null, direct, name: b.name };
     this.strokeMove(st, e);
@@ -418,7 +452,7 @@ export class Editor {
       this.strokeCtx.clearRect(x0, y0, x1 - x0, y1 - y0);
     }
     this.pushPaint(L, [x0, y0, x1 - x0, y1 - y0], st.name);
-    this.dirtyLayers.add(L.id);
+    this.dirtyLayers.add(L.id); (this.thumbVer ||= {})[L.id] = (this.thumbVer[L.id] || 0) + 1;
     if (b.kind === 'draw' && !this.recent.includes(this.color)) { this.recent = [this.color, ...this.recent].slice(0, 12); setSetting('recentColors', this.recent); }
     this.changed(); this.dirty = true; this.renderLayersOnly();
   }
@@ -440,18 +474,26 @@ export class Editor {
 
   // ---------- undo ----------
   pushPaint(L, rect, label = 'Paint') {
-    const [x, y, w, h] = rect, before = mk(w, h), after = mk(w, h);
+    const [x, y, w, h] = rect, before = mk(w, h);
     before.getContext('2d').drawImage(this.pre, x, y, w, h, 0, 0, w, h);
-    after.getContext('2d').drawImage(this.res[L.id], x, y, w, h, 0, 0, w, h);
-    this.undo.push({ kind: 'paint', id: L.id, rect, before, after, label: label + ' on ' + L.name }); this.redo = [];
-    if (this.undo.length > 80) this.undo.shift();
+    this.undo.push({ kind: 'paint', id: L.id, rect, before, after: null, label: label + ' on ' + L.name }); this.dropRedo();
+    this.trimUndo();
     this.updUndo();
   }
-  pushState(before, label = 'Change') { this.undo.push({ kind: 'state', before, after: clone(this.page.layers), label }); this.redo = []; if (this.undo.length > 80) this.undo.shift(); this.updUndo(); }
+  dropRedo() { for (const en of this.redo) { if (en.before?.width) en.before.width = 0; if (en.after?.width) en.after.width = 0; } this.redo = []; }
+  // keep undo memory in check so drawing stays fast however long you work
+  trimUndo() {
+    const px = en => en.kind === 'paint' ? en.rect[2] * en.rect[3] * (en.after ? 2 : 1) : en.paint ? Object.values(en.paint.before).concat(Object.values(en.paint.after)).reduce((s, c) => s + c.width * c.height, 0) : 0;
+    let total = this.undo.reduce((s, en) => s + px(en), 0);
+    const limit = 90e6; // about 360 MB of pixels
+    while ((this.undo.length > 100 || total > limit) && this.undo.length > 5) { const en = this.undo.shift(); total -= px(en); if (en.before?.width) en.before.width = 0; }
+  }
+  pushState(before, label = 'Change') { this.undo.push({ kind: 'state', before, after: clone(this.page.layers), label }); this.dropRedo(); this.trimUndo(); this.updUndo(); }
   applyEntry(en, dir) {
     if (en.kind === 'paint') {
       if (!this.res[en.id]) return;
       const [x, y, w, h] = en.rect, c = this.res[en.id].getContext('2d');
+      if (dir < 0 && !en.after) { en.after = mk(w, h); en.after.getContext('2d').drawImage(this.res[en.id], x, y, w, h, 0, 0, w, h); }
       c.save(); c.globalCompositeOperation = 'copy'; c.drawImage(dir < 0 ? en.before : en.after, 0, 0, w, h, x, y, w, h); c.restore();
       this.dirtyLayers.add(en.id);
     } else {
@@ -483,10 +525,53 @@ export class Editor {
     if (silent) toast('Added a new drawing layer for you.');
     this.changed(); this.renderPanels(); return L;
   }
-  async addImageAsset(a) {
+  // ---------- quick menu ----------
+  closeQuick() { const q = document.querySelector('.quick-menu'); if (q) { q.remove(); document.removeEventListener('pointerdown', this.quickAway, true); return true; } return false; }
+  quickMenu(x, y) {
+    this.closeQuick();
+    const p = this.preset;
+    const q = el('div', { class: 'quick-menu', role: 'dialog', 'aria-label': 'Quick menu' });
+    const tools = el('div', { class: 'qm-tools' }, ...TOOLS_UI.filter(t => t[0] !== 'hand').map(([id, label, key, icon]) => el('button', { class: 'qm-tool' + (this.tool === id ? ' on' : ''), title: `${label} (${key})`, onclick: () => { this.setTool(id); this.quickMenu(x, y); } }, icon)));
+    const acts = el('div', { class: 'qm-acts' },
+      el('button', { class: 'btn small', title: 'Undo (Ctrl+Z)', disabled: !this.undo.length, onclick: () => { this.doUndo(); } }, '↶ Undo'),
+      el('button', { class: 'btn small', title: 'Redo (Ctrl+Shift+Z)', disabled: !this.redo.length, onclick: () => { this.doRedo(); } }, '↷ Redo'),
+      el('button', { class: 'btn small', title: 'Swap colors (X)', onclick: () => { this.swapColors(); this.quickMenu(x, y); } }, '⇄'),
+      el('button', { class: 'btn small', title: 'Stickers tray (K)', onclick: () => { this.closeQuick(); this.toggleTray(); } }, '★'));
+    const sliders = el('div', { class: 'qm-sliders' });
+    if (['brush', 'blend', 'eraser'].includes(this.tool)) {
+      for (const d of paramsFor(p.engine)) {
+        if (d.type) continue;
+        const v = p[d.k] ?? 0, fmt = d.unit === 'px' ? x => Math.round(x) : d.unit === '°' ? x => Math.round(x) + '°' : d.pct ? x => Math.round(x * 100 / (d.pct === 0.5 ? 2 : 1)) + '%' : x => Math.round(x);
+        const val = el('span', { class: 'qv' }, fmt(v));
+        const r = el('input', { type: 'range', min: d.min, max: d.max, step: d.step, value: v, 'aria-label': d.label });
+        r.addEventListener('input', () => { this.setBrushProp(d.k, +r.value, true); val.textContent = fmt(+r.value); this.updDock(); if (d.k === 'size') this.flashSize(); });
+        r.addEventListener('change', () => r.blur());
+        sliders.append(el('label', { class: 'qs', title: d.help }, el('span', { class: 'ql' }, d.short || d.label), r, val));
+      }
+    }
+    const sw = list => el('div', { class: 'qm-sw' }, list.slice(0, 12).map(c => el('button', { class: 'sw' + (c === this.color ? ' on' : ''), style: { background: c }, title: c, onclick: () => { this.userColor = true; this.setColor(c); this.quickMenu(x, y); } })));
+    const recentB = (this.recentBrushes || []).map(id => this.brushes.find(b => b.id === id)).filter(Boolean).slice(0, 6);
+    q.append(el('div', { class: 'qm-head' }, el('b', {}, this.tool === 'brush' || this.tool === 'blend' || this.tool === 'eraser' ? p.name : (TOOLS_UI.find(t => t[0] === this.tool) || [, ''])[1]), el('button', { class: 'icon-btn tiny', title: 'Close (Esc)', onclick: () => this.closeQuick() }, '✕')),
+      tools, acts, sliders);
+    if (recentB.length) q.append(el('div', { class: 'qm-lbl' }, 'Recent brushes'), el('div', { class: 'qm-brushes' }, recentB.map(b => el('button', { class: 'btn small' + (b.id === p.id ? ' lit' : ''), onclick: () => { const t = b.kind === 'blend' ? 'blend' : b.kind === 'erase' ? 'eraser' : 'brush'; if (t !== this.tool) this.setTool(t); this.curId = b.id; this.renderPanels(); this.quickMenu(x, y); } }, b.name))));
+    if (this.tool !== 'eraser') q.append(el('div', { class: 'qm-lbl' }, 'Colors'), sw([this.color, this.color2, ...this.recent.filter(c => c !== this.color && c !== this.color2), ...PALETTE].filter((c, i, a) => a.indexOf(c) === i)));
+    q.append(el('div', { class: 'qm-tip muted small' }, 'Right-click or Q opens this. Alt + scroll changes the size.'));
+    document.body.append(q);
+    const W = q.offsetWidth, H = q.offsetHeight;
+    q.style.left = Math.max(8, Math.min(innerWidth - W - 8, x - W / 2)) + 'px'; q.style.top = Math.max(8, Math.min(innerHeight - H - 8, y - 30)) + 'px';
+    this.quickAway = ev => { if (!q.contains(ev.target)) this.closeQuick(); };
+    setTimeout(() => document.addEventListener('pointerdown', this.quickAway, true), 0);
+  }
+  flashSize() { this.sizeFlash = performance.now(); this.dirty = true; clearTimeout(this.sfT); this.sfT = setTimeout(() => { this.dirty = true; }, 700); }
+
+  toggleTray() {
+    const was = this.stage.querySelector('.sticker-tray'); if (was) { was.remove(); return; }
+    this.stage.append(pieceTray({ onPick: a => this.addImageAsset(a), onNew: done => this.app.openFactory(null, a => { this.addImageAsset(a); done(); }) }));
+  }
+  async addImageAsset(a, at) {
     const before = clone(this.page.layers), P = this.page;
     const s = Math.min(1, (P.w * 0.6) / a.w, (P.h * 0.6) / a.h);
-    const L = { id: uid('l_'), name: a.name || 'Image', kind: 'image', src: a.blob, asset: a.id, media: a.media || null, iw: a.w, ih: a.h, x: P.w / 2, y: P.h / 2, scale: s, rot: (a.kind === 'sticker' || a.kind === 'made') ? (Math.random() - 0.5) * 0.12 : 0, visible: true, opacity: 1, blend: 'source-over', locked: false, filter: {}, shadow: { on: a.kind === 'sticker' || a.kind === 'made', blur: 10, dx: 4, dy: 6, color: '#000000', a: 0.3 } };
+    const L = { id: uid('l_'), name: a.name || 'Image', kind: 'image', src: a.blob, asset: a.id, media: a.media || null, iw: a.w, ih: a.h, x: at ? at.x : P.w / 2, y: at ? at.y : P.h / 2, fx: a.kind === 'sticker' ? { finish: 'satin', finishAmt: 0.35 } : null, scale: s, rot: (a.kind === 'sticker' || a.kind === 'made') ? (Math.random() - 0.5) * 0.12 : 0, visible: true, opacity: 1, blend: 'source-over', locked: false, filter: {}, shadow: { on: a.kind === 'sticker' || a.kind === 'made', blur: 10, dx: 4, dy: 6, color: '#000000', a: 0.3 } };
     this.res[L.id] = await mediaRes(L);
     if (!this.res[L.id]) return toast('This file could not be opened.', 'err');
     const i = this.page.layers.findIndex(l => l.id === this.activeId);
@@ -617,8 +702,8 @@ export class Editor {
     s.classList.add('sec-layers'); return s;
   }
   brushGroups() {
-    const kind = this.kindForTool, list = this.brushes.filter(p => (p.kind || 'draw') === kind);
-    const grp = p => p.id.startsWith('u_') ? 'My brushes' : kind !== 'draw' ? '' : ['pencil', 'charcoal', 'pastel'].includes(p.tool) ? 'Pencils, charcoal and pastels' : ['pen', 'fineliner', 'nib', 'inkbrush'].includes(p.tool) ? 'Inks' : p.engine === 'paint' ? 'Paints' : 'Watercolor, markers and effects';
+    const kind = this.kindForTool, list = this.brushes.filter(p => (p.kind || 'draw') === kind || (kind === 'draw' && p.kind === 'blend'));
+    const grp = p => p.id.startsWith('u_') ? 'My brushes' : p.kind === 'blend' && kind === 'draw' ? 'Blenders and smoothing' : kind !== 'draw' ? '' : ['pencil', 'charcoal', 'pastel'].includes(p.tool) ? 'Pencils, charcoal and pastels' : ['pen', 'fineliner', 'nib', 'inkbrush'].includes(p.tool) ? 'Inks' : p.engine === 'paint' ? 'Paints' : 'Watercolor, markers and effects';
     const out = new Map(); for (const p of list) { const k = grp(p); if (!out.has(k)) out.set(k, []); out.get(k).push(p); }
     return out;
   }
@@ -668,6 +753,7 @@ export class Editor {
     let row;
     if (def.type === 'select') row = select(def.label, value ?? Object.keys(def.options)[0], def.options, v => set(def.k, v));
     else if (def.type === 'check') row = check(def.label, !!value, v => set(def.k, v));
+    else if (def.type === 'color') row = colorInput(def.label, value || '#ffffff', v => set(def.k, v));
     else {
       const fmt = def.pct ? v => Math.round(v * 100 / (def.pct === 0.5 ? 2 : 1)) + '%' : def.unit ? v => (+v).toFixed(def.step < 1 ? 1 : 0).replace(/\.0$/, '') + ' ' + def.unit : v => v;
       const disp = def.k === 'min' ? v => Math.round(v * 100) + '%' : fmt;
@@ -776,13 +862,18 @@ export class Editor {
     return box;
   }
   layerThumb(L) {
+    this.thumbCache ||= new Map();
+    const key = L.id + '|' + (this.thumbVer?.[L.id] || 0) + '|' + JSON.stringify([L.x, L.y, L.scale, L.rot, L.src, L.text, L.fx, L.filter]);
+    const hit = this.thumbCache.get(L.id);
+    if (hit && hit.key === key) { const cc = mk(44, 44); cc.getContext('2d').drawImage(hit.c, 0, 0); return cc; }
     const c = mk(44, 44), g = c.getContext('2d'), P = this.page, s = Math.min(44 / P.w, 44 / P.h);
     g.fillStyle = '#e9e5dc'; g.fillRect(0, 0, 44, 44);
     g.save(); g.translate((44 - P.w * s) / 2, (44 - P.h * s) / 2); g.scale(s, s);
     g.fillStyle = '#fff'; g.fillRect(0, 0, P.w, P.h);
     try { drawLayer(g, { ...L, visible: true, opacity: 1, blend: 'source-over' }, this.res, s); } catch (e) { }
     g.restore();
-    return c;
+    this.thumbCache.set(L.id, { key, c }); const cc = mk(44, 44); cc.getContext('2d').drawImage(c, 0, 0);
+    return cc;
   }
   layerList() {
     const P = this.page, box = el('div', { class: 'layers' });
@@ -906,6 +997,17 @@ export class Editor {
         el('button', { class: 'btn small', onclick: () => { const i = this.page.layers.indexOf(L); this.activeId = L.id; this.moveLayer(L.id, this.page.layers.length - 1); } }, 'Bring to front'),
         el('button', { class: 'btn small', onclick: () => { this.activeId = L.id; this.moveLayer(L.id, 0); } }, 'Send to back')));
     if (L.kind === 'image') {
+      // sticker look: presets plus every setting, each explained
+      const fx = { ...FX_DEFAULT, ...(L.fx || {}) };
+      const setFx = (k, v) => { L.fx = { ...(L.fx || {}), [k]: v }; live(); };
+      const presets = el('div', { class: 'fx-presets' });
+      for (const [k, pr] of Object.entries(FX_PRESETS)) presets.append(el('button', { class: 'btn small', title: 'Apply the ' + pr.name + ' look', onclick: () => { const before = clone(this.page.layers); const { name, ...v } = pr; L.fx = k === 'plain' ? {} : { ...v }; this.pushState(before, 'Sticker look: ' + name); live(); this.renderPanels(); } }, pr.name));
+      out.push(el('div', { class: 'grp-title' }, 'Sticker look'), el('p', { class: 'muted small' }, 'Pick a look, then change any setting below. The original picture is never changed.'), presets);
+      let g0 = '';
+      for (const d of FX_PARAMS) {
+        if (d.g !== g0) { out.push(el('div', { class: 'grp-title sub' }, d.g)); g0 = d.g; }
+        out.push(this.paramControl(null, { ...d, pct: d.pct ? 1 : 0 }, fx[d.k], (k, v) => setFx(k, d.k === 'border' ? v : v)));
+      }
       out.push(el('div', { class: 'grp-title' }, 'Adjust'),
         slider('Brightness', f.b ?? 100, 0, 200, 1, v => { f.b = v; live(); }, v => v + '%'),
         slider('Contrast', f.c ?? 100, 0, 200, 1, v => { f.c = v; live(); }, v => v + '%'),
@@ -1003,7 +1105,11 @@ export class Editor {
   // ---------- keys ----------
   bindKeys() {
     this.keyDown = e => {
-      if (!this.root || e.target.closest('input, textarea, select') || document.querySelector('.modal-back')) return;
+      if (!this.root || document.querySelector('.modal-back')) return;
+      const typing = e.target.closest?.('textarea, select, [contenteditable]') || (e.target.tagName === 'INPUT' && !['range', 'checkbox', 'color', 'button', 'radio'].includes(e.target.type));
+      if (typing) return;
+      if (e.target.tagName === 'INPUT' && !e.ctrlKey && !e.metaKey && e.key.startsWith('Arrow')) return; // arrows still move sliders
+      if (e.target.tagName === 'INPUT') e.target.blur();
       const k = e.key.toLowerCase();
       if (e.ctrlKey || e.metaKey) {
         if (k === 'z' && !e.shiftKey) { e.preventDefault(); this.doUndo(); }
@@ -1025,6 +1131,8 @@ export class Editor {
       const map = { b: 'brush', e: 'eraser', s: 'blend', g: 'fill', i: 'pick', v: 'move', t: 'text', h: 'hand' };
       if (map[k]) return this.setTool(map[k]);
       if (k === 'p') return this.togglePreview();
+      if (k === 'k') return this.toggleTray();
+      if (k === 'q') { const h = this.hover; const r = this.canvas.getBoundingClientRect(); return this.quickMenu(h ? r.left + h.sx : r.left + this.vw / 2, h ? r.top + h.sy : r.top + this.vh / 2); }
       if (k === 'x') return this.swapColors();
       if (k === '/') return this.layerOp('alpha');
       if (k === '[' || k === ']') {
@@ -1038,7 +1146,7 @@ export class Editor {
       if (k === '=' || k === '+') this.zoomBy(1.25);
       if (k === '-') this.zoomBy(0.8);
       if ((k === 'delete' || k === 'backspace') && this.selection.size) { e.preventDefault(); this.deleteSelected(); }
-      if (k === 'escape') this.selectOnly(null);
+      if (k === 'escape') { if (this.closeQuick()) return; this.selectOnly(null); }
       const items = this.selItems.filter(l => !l.locked);
       if (items.length && k.startsWith('arrow')) { e.preventDefault(); const d = e.shiftKey ? 10 : 1; for (const sel of items) { if (k === 'arrowleft') sel.x -= d; if (k === 'arrowright') sel.x += d; if (k === 'arrowup') sel.y -= d; if (k === 'arrowdown') sel.y += d; } this.changed(); this.dirty = true; }
       if (k === 'pagedown') this.gotoPage(this.idx + 1);
@@ -1052,7 +1160,8 @@ export class Editor {
   changed(now) {
     this.isChanged = true; this.status.textContent = 'Not saved yet';
     clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => this.save(), now ? 10 : 2500);
+    const tick = () => { if (this.stroking || (performance.now() - (this.lastInput || 0) < 1800)) { this.saveTimer = setTimeout(tick, 800); return; } this.save(); };
+    this.saveTimer = setTimeout(now ? () => this.save() : tick, now ? 10 : 2500);
   }
   async save(force) {
     if (!this.isChanged && !force) return;

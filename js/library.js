@@ -88,3 +88,30 @@ export async function assetGrid(kinds, onPick, { onDelete, empty = 'Nothing here
   }
   return grid;
 }
+
+// A floating tray of library pieces you can drag onto a canvas (editor) or click to place.
+export function pieceTray({ onPick, onClose, onNew, kinds = ['sticker', 'made'] }) {
+  const grid = el('div', { class: 'st-grid' });
+  const fill = async ks => {
+    grid.innerHTML = '';
+    const list = (await db.all('assets')).filter(a => ks.includes(a.kind)).sort((a, b) => b.created - a.created);
+    if (!list.length) grid.append(el('p', { class: 'muted small', style: { gridColumn: '1 / -1' } }, 'Nothing here yet. Make stickers in the Sticker factory or Makers, or import art.'));
+    for (const a of list) {
+      const img = el('img', { alt: a.name }); assetURL(a).then(u => img.src = u);
+      const it = el('div', { class: 'st-item', draggable: 'true', title: a.name + '. Drag it where you want it, or click to put it in the middle.' }, img);
+      it.addEventListener('dragstart', e => { e.dataTransfer.setData('application/x-shesketches-asset', a.id); e.dataTransfer.effectAllowed = 'copy'; if (img.complete) e.dataTransfer.setDragImage(img, 40, 40); });
+      it.addEventListener('click', () => onPick(a));
+      grid.append(it);
+    }
+  };
+  const tab = (label, ks) => el('button', { class: 'btn small', onclick: e => { tray.querySelectorAll('.st-tabs .btn').forEach(b => b.classList.remove('lit')); e.target.classList.add('lit'); fill(ks); } }, label);
+  const tray = el('div', { class: 'sticker-tray' },
+    el('div', { class: 'st-head' }, el('b', {}, 'Stickers and pieces'), el('button', { class: 'icon-btn tiny', title: 'Close', onclick: () => { tray.remove(); onClose && onClose(); } }, '✕')),
+    el('p', { class: 'muted small', style: { margin: '6px 10px 0' } }, 'Drag a piece onto the page, or click it. Then change its look on the right.'),
+    el('div', { class: 'st-tabs' }, tab('Stickers', ['sticker', 'made']), tab('My art', ['art']), tab('GIFs', ['media']), tab('All', ['sticker', 'made', 'art', 'media']),
+      onNew ? el('button', { class: 'btn small', onclick: () => onNew(() => fill(['sticker', 'made'])) }, '+ New') : null),
+    grid);
+  tray.querySelector('.st-tabs .btn').classList.add('lit');
+  fill(kinds);
+  return tray;
+}

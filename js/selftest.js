@@ -61,6 +61,15 @@ async function run() {
       const L = og.getImageData(25, 50, 1, 1).data, Rr = og.getImageData(75, 50, 1, 1).data;
       t(L[0] > 200 && L[3] > 200 && Rr[3] === 0, 'Clipping masks work', `inside ${L[0]},${L[3]} outside alpha ${Rr[3]}`);
     }
+    // every sticker look changes the sticker
+    {
+      const { applyFx, FX_PRESETS } = await import('./stickerfx.js');
+      const st = document.createElement('canvas'); st.width = 200; st.height = 160; const sg = st.getContext('2d'); sg.fillStyle = '#c23b3b'; sg.fillRect(20, 20, 160, 120);
+      const sig = c => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let v = 0; for (let i = 0; i < d.length; i += 16) v += d[i] * 3 + d[i + 1] * 5 + d[i + 2] * 7 + d[i + 3]; return v + c.width * 1e9; };
+      const base = sig(st), same = [];
+      for (const [k, p] of Object.entries(FX_PRESETS)) { if (k === 'plain') continue; const { name, ...v } = p; const r = applyFx(st, v, 'test'); if (sig(r.canvas) === base) same.push(name); }
+      t(!same.length, `All ${Object.keys(FX_PRESETS).length - 1} sticker looks change the sticker`, same.length ? 'no change: ' + same.join(', ') : 'border, gloss, holo, glitter, foil, puffy, paper, vintage, patch, peeling, worn');
+    }
     // custom paper with printed lines
     registerPapers([{ id: 'u_test', name: 'Test', color: '#f0e8d8', lines: 'grid', lineColor: '#ff0000', lineGap: 0.05, crumple: 0.5 }]);
     { const cv = document.createElement('canvas'); cv.width = 300; cv.height = 400; paintPaper(cv.getContext('2d'), 300, 400, 'u_test', null, null, 1); const d2 = cv.getContext('2d').getImageData(0, 0, 300, 400).data; let red = 0; for (let i = 0; i < d2.length; i += 4) if (d2[i] > d2[i + 1] + 30) red++; t(red > 500, 'Paper maker papers draw with printed lines', red + ' line pixels'); }

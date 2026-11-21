@@ -12,34 +12,34 @@ import { grainTile } from './paper.js';
 // ---------- what every setting means (used by the brush panel and the brush maker) ----------
 // engines: which engines use the setting
 export const PARAMS = [
-  { k: 'size', g: 'Basics', label: 'Size', min: 1, max: 600, step: 0.5, unit: 'px', help: 'How wide the brush is, in page pixels.', engines: '*' },
-  { k: 'opacity', g: 'Basics', label: 'Strength', min: 0.02, max: 1, step: 0.01, pct: 1, help: 'How strong the brush can get. Lower it to work in light, see-through layers.', engines: '*' },
-  { k: 'flow', g: 'Basics', label: 'Flow', min: 0.01, max: 1, step: 0.01, pct: 1, help: 'How much each touch puts down. Low flow builds up slowly as you go over an area again.', engines: '*' },
-  { k: 'min', g: 'Pen pressure', label: 'Lightest press size', min: 0, max: 1, step: 0.01, pct: 1, help: 'How big the brush is when you press very lightly, compared to its full size. 100% means pressure does not change the size.', engines: '*' },
-  { k: 'pOpacity', g: 'Pen pressure', label: 'Pressure to strength', min: 0, max: 1, step: 0.01, pct: 1, help: 'How much pressing harder makes the mark darker or more opaque.', engines: '*' },
-  { k: 'smooth', g: 'Pen pressure', label: 'Smoothing', min: 0, max: 0.95, step: 0.01, pct: 1, help: 'Steadies shaky lines. Higher is smoother but trails a little behind your hand.', engines: '*' },
+  { k: 'size', short: 'Size', g: 'Basics', label: 'Size', min: 1, max: 600, step: 0.5, unit: 'px', help: 'How wide the brush is, in page pixels.', engines: '*' },
+  { k: 'opacity', short: 'Strength', g: 'Basics', label: 'Strength', min: 0.02, max: 1, step: 0.01, pct: 1, help: 'How strong the brush can get. Lower it to work in light, see-through layers.', engines: '*' },
+  { k: 'flow', short: 'Flow', g: 'Basics', label: 'Flow', min: 0.01, max: 1, step: 0.01, pct: 1, help: 'How much each touch puts down. Low flow builds up slowly as you go over an area again.', engines: '*' },
+  { k: 'min', short: 'Light press', g: 'Pen pressure', label: 'Lightest press size', min: 0, max: 1, step: 0.01, pct: 1, help: 'How big the brush is when you press very lightly, compared to its full size. 100% means pressure does not change the size.', engines: '*' },
+  { k: 'pOpacity', short: 'Press = darker', g: 'Pen pressure', label: 'Pressure to strength', min: 0, max: 1, step: 0.01, pct: 1, help: 'How much pressing harder makes the mark darker or more opaque.', engines: '*' },
+  { k: 'smooth', short: 'Steady line', g: 'Pen pressure', label: 'Smoothing', min: 0, max: 0.95, step: 0.01, pct: 1, help: 'Steadies shaky lines. Higher is smoother but trails a little behind your hand.', engines: '*' },
   { k: 'tip', g: 'Tip', label: 'Tip shape', type: 'select', options: { round: 'Round', bristle: 'Bristle hairs', flat: 'Flat brush', chalk: 'Chalky stick', nib: 'Pen nib' }, help: 'The shape of the brush. Bristles leave hair streaks, flat brushes leave wide strokes that turn with your hand.', engines: ['paint', 'stamp', 'erase'] },
-  { k: 'hard', g: 'Tip', label: 'Hardness', min: 0, max: 1, step: 0.01, pct: 1, help: 'Soft edges fade out, hard edges are crisp.', engines: ['stamp', 'paint', 'water', 'marker', 'erase'] },
-  { k: 'spacing', g: 'Tip', label: 'Spacing', min: 0.02, max: 1, step: 0.01, pct: 1, help: 'How far apart each touch of the tip is along the line. Small spacing is smooth, big spacing makes dotted lines.', engines: ['stamp', 'paint', 'water', 'marker', 'erase'] },
-  { k: 'round', g: 'Tip', label: 'Roundness', min: 0.08, max: 1, step: 0.01, pct: 1, help: 'Squash the tip into an oval, like a chisel marker or a calligraphy nib.', engines: ['stamp', 'paint', 'marker', 'erase'] },
-  { k: 'angle', g: 'Tip', label: 'Tip angle', min: -90, max: 90, step: 1, unit: '°', help: 'Which way an oval or flat tip points.', engines: ['stamp', 'paint', 'marker', 'erase'] },
+  { k: 'hard', short: 'Hardness', g: 'Tip', label: 'Hardness', min: 0, max: 1, step: 0.01, pct: 1, help: 'Soft edges fade out, hard edges are crisp.', engines: ['stamp', 'paint', 'water', 'marker', 'erase'] },
+  { k: 'spacing', short: 'Spacing', g: 'Tip', label: 'Spacing', min: 0.02, max: 1, step: 0.01, pct: 1, help: 'How far apart each touch of the tip is along the line. Small spacing is smooth, big spacing makes dotted lines.', engines: ['stamp', 'paint', 'water', 'marker', 'erase'] },
+  { k: 'round', short: 'Roundness', g: 'Tip', label: 'Roundness', min: 0.08, max: 1, step: 0.01, pct: 1, help: 'Squash the tip into an oval, like a chisel marker or a calligraphy nib.', engines: ['stamp', 'paint', 'marker', 'erase'] },
+  { k: 'angle', short: 'Tip angle', g: 'Tip', label: 'Tip angle', min: -90, max: 90, step: 1, unit: '°', help: 'Which way an oval or flat tip points.', engines: ['stamp', 'paint', 'marker', 'erase'] },
   { k: 'follow', g: 'Tip', label: 'Turn tip with the stroke', type: 'check', help: 'On: the tip turns as your line turns, like a real flat brush. Off: it keeps the same angle, like a calligraphy pen.', engines: ['paint', 'stamp'] },
-  { k: 'bristles', g: 'Tip', label: 'Bristles', min: 4, max: 90, step: 1, help: 'How many hairs a bristle brush has. Fewer hairs make rougher streaks.', engines: ['paint'] },
-  { k: 'dry', g: 'Tip', label: 'Runs dry', min: 0, max: 2, step: 0.01, pct: 0.5, help: 'How fast the brush runs out of paint along a stroke. High values give scratchy dry brush ends.', engines: ['paint'] },
-  { k: 'jitter', g: 'Texture', label: 'Size jitter', min: 0, max: 1, step: 0.01, pct: 1, help: 'Random size changes, for natural, uneven marks.', engines: ['stamp', 'water', 'erase'] },
-  { k: 'scatter', g: 'Texture', label: 'Scatter', min: 0, max: 2, step: 0.01, pct: 1, help: 'Spreads each touch away from the line, like crumbly charcoal.', engines: ['stamp'] },
-  { k: 'grain', g: 'Texture', label: 'Paper grain', min: 0, max: 1, step: 0.01, pct: 1, help: 'How much the mark skips over the dips in the paper, like pencil or pastel on textured paper.', engines: ['stamp', 'paint', 'water', 'erase'] },
-  { k: 'wax', g: 'Texture', label: 'Press into grain', min: 0, max: 1.5, step: 0.01, pct: 1, help: 'Pressing harder fills the paper dips, like waxy crayon or oil pastel.', engines: ['stamp', 'paint'] },
-  { k: 'dust', g: 'Texture', label: 'Dust', min: 0, max: 1, step: 0.01, pct: 1, help: 'Little specks fall around the line, like charcoal or soft pastel.', engines: ['stamp'] },
-  { k: 'load', g: 'Paint and mixing', label: 'Paint on brush', min: 0, max: 1, step: 0.01, pct: 1, help: 'How much fresh color the brush takes on with every touch. At 0 the brush adds no new color and only blends what is already there.', engines: ['paint'] },
-  { k: 'pickup', g: 'Paint and mixing', label: 'Pick up and blend', min: 0, max: 1, step: 0.01, pct: 1, help: 'How much of the paint under the brush it drags along and mixes in. High values smear and blend colors together.', engines: ['paint'] },
-  { k: 'wet', g: 'Paint and mixing', label: 'Water', min: 0, max: 1, step: 0.01, pct: 1, help: 'Thins the paint with water so it goes on see-through and soft.', engines: ['paint'] },
-  { k: 'lift', g: 'Paint and mixing', label: 'Lift paint off', min: 0, max: 1, step: 0.01, pct: 1, help: 'Takes paint off the page as you brush, like a damp brush or a paper towel.', engines: ['paint'] },
-  { k: 'soften', g: 'Paint and mixing', label: 'Soften', min: 0, max: 1, step: 0.01, pct: 1, help: 'Blurs the colors the brush carries, for smooth soft blends.', engines: ['paint'] },
+  { k: 'bristles', short: 'Bristles', g: 'Tip', label: 'Bristles', min: 4, max: 90, step: 1, help: 'How many hairs a bristle brush has. Fewer hairs make rougher streaks.', engines: ['paint'] },
+  { k: 'dry', short: 'Runs dry', g: 'Tip', label: 'Runs dry', min: 0, max: 2, step: 0.01, pct: 0.5, help: 'How fast the brush runs out of paint along a stroke. High values give scratchy dry brush ends.', engines: ['paint'] },
+  { k: 'jitter', short: 'Jitter', g: 'Texture', label: 'Size jitter', min: 0, max: 1, step: 0.01, pct: 1, help: 'Random size changes, for natural, uneven marks.', engines: ['stamp', 'water', 'erase'] },
+  { k: 'scatter', short: 'Scatter', g: 'Texture', label: 'Scatter', min: 0, max: 2, step: 0.01, pct: 1, help: 'Spreads each touch away from the line, like crumbly charcoal.', engines: ['stamp'] },
+  { k: 'grain', short: 'Paper grain', g: 'Texture', label: 'Paper grain', min: 0, max: 1, step: 0.01, pct: 1, help: 'How much the mark skips over the dips in the paper, like pencil or pastel on textured paper.', engines: ['stamp', 'paint', 'water', 'erase'] },
+  { k: 'wax', short: 'Wax', g: 'Texture', label: 'Press into grain', min: 0, max: 1.5, step: 0.01, pct: 1, help: 'Pressing harder fills the paper dips, like waxy crayon or oil pastel.', engines: ['stamp', 'paint'] },
+  { k: 'dust', short: 'Dust', g: 'Texture', label: 'Dust', min: 0, max: 1, step: 0.01, pct: 1, help: 'Little specks fall around the line, like charcoal or soft pastel.', engines: ['stamp'] },
+  { k: 'load', short: 'Paint', g: 'Paint and mixing', label: 'Paint on brush', min: 0, max: 1, step: 0.01, pct: 1, help: 'How much fresh color the brush takes on with every touch. At 0 the brush adds no new color and only blends what is already there.', engines: ['paint'] },
+  { k: 'pickup', short: 'Mix', g: 'Paint and mixing', label: 'Mix (pick up and blend)', min: 0, max: 1, step: 0.01, pct: 1, help: 'How much the brush mixes with the colors under it. 0 lays clean color on top. High values drag, blend and mix colors together like wet paint.', engines: ['paint'] },
+  { k: 'wet', short: 'Water', g: 'Paint and mixing', label: 'Water', min: 0, max: 1, step: 0.01, pct: 1, help: 'Thins the paint with water so it goes on see-through and soft.', engines: ['paint'] },
+  { k: 'lift', short: 'Lift', g: 'Paint and mixing', label: 'Lift paint off', min: 0, max: 1, step: 0.01, pct: 1, help: 'Takes paint off the page as you brush, like a damp brush or a paper towel.', engines: ['paint'] },
+  { k: 'soften', short: 'Soften', g: 'Paint and mixing', label: 'Soften', min: 0, max: 1, step: 0.01, pct: 1, help: 'Blurs the colors the brush carries, for smooth soft blends.', engines: ['paint'] },
   { k: 'mixMode', g: 'Paint and mixing', label: 'Color mixing', type: 'select', options: { paint: 'Like real paint (blue + yellow = green)', light: 'Like light (blue + yellow = gray)' }, help: 'How colors mix when they meet. Real paint mixing is what you would get on a palette.', engines: ['paint'] },
   { k: 'sampleAll', g: 'Paint and mixing', label: 'Blend with all layers below', type: 'check', help: 'On: the brush mixes with everything you see under this layer. Off: it only mixes with paint on this layer.', engines: ['paint'] },
-  { k: 'impasto', g: 'Effects', label: 'Thick paint', min: 0, max: 1.5, step: 0.01, pct: 1, help: 'Leaves raised ridges with light and shadow, like thick oil paint.', engines: ['paint'] },
-  { k: 'wetEdge', g: 'Effects', label: 'Wet edges', min: 0, max: 1, step: 0.01, pct: 1, help: 'Pigment pools at the edges as the wash dries, like real watercolor.', engines: ['water'] },
+  { k: 'impasto', short: 'Thick paint', g: 'Effects', label: 'Thick paint', min: 0, max: 1.5, step: 0.01, pct: 1, help: 'Leaves raised ridges with light and shadow, like thick oil paint.', engines: ['paint'] },
+  { k: 'wetEdge', short: 'Wet edges', g: 'Effects', label: 'Wet edges', min: 0, max: 1, step: 0.01, pct: 1, help: 'Pigment pools at the edges as the wash dries, like real watercolor.', engines: ['water'] },
   { k: 'blend', g: 'Effects', label: 'Blend mode', type: 'select', options: { 'source-over': 'Normal', multiply: 'Multiply (glaze, darkens)', screen: 'Screen (lightens)', overlay: 'Overlay', 'soft-light': 'Soft light', darken: 'Darken', lighten: 'Lighten', color: 'Color only', luminosity: 'Brightness only' }, help: 'How the mark combines with what is under it on the same layer. Multiply works like layering see-through ink.', engines: ['stamp', 'water', 'marker', 'splat', 'paint'] },
 ];
 export const ENGINES = { stamp: 'Dry media (pencil, pen, charcoal)', paint: 'Wet paint that mixes', water: 'Watercolor glaze', marker: 'Marker', splat: 'Splatter', erase: 'Eraser' };
@@ -67,7 +67,7 @@ export const PRESETS = [
   { id: 'gel', kind: D, name: 'Gel pen', tool: 'fineliner', engine: 'stamp', size: 5, min: 0.85, opacity: 1, flow: 1, hard: 0.95, spacing: 0.05, grain: 0.1, smooth: 0.5, color: '#f4f1ea', desc: 'Opaque gel ink, great in white on dark paper.' },
   { id: 'sumi', kind: D, name: 'Ink brush (sumi)', tool: 'inkbrush', engine: 'paint', tip: 'bristle', size: 40, min: 0.12, opacity: 1, pOpacity: 0.3, flow: 1, bristles: 30, load: 0.9, pickup: 0.08, dry: 0.55, hard: 0.6, spacing: 0.04, follow: true, smooth: 0.35, color: '#0d0d0e', desc: 'A soft ink brush with hair streaks that run dry at the end of a stroke.' },
   // ---- paint
-  { id: 'oil', kind: D, name: 'Oil brush', tool: 'brush', engine: 'paint', tip: 'bristle', size: 38, min: 0.5, opacity: 1, pOpacity: 0.3, flow: 1, bristles: 36, load: 0.3, pickup: 0.5, dry: 0.15, impasto: 0.35, hard: 0.55, spacing: 0.04, follow: true, smooth: 0.3, desc: 'Buttery oil paint. It drags and mixes with wet colors under it.' },
+  { id: 'oil', kind: D, name: 'Oil brush', tool: 'brush', engine: 'paint', tip: 'bristle', size: 38, min: 0.5, opacity: 1, pOpacity: 0.3, flow: 1, bristles: 36, load: 0.42, pickup: 0.45, dry: 0.15, impasto: 0.2, hard: 0.72, spacing: 0.04, follow: true, smooth: 0.3, desc: 'Buttery oil paint. It drags and mixes with wet colors under it.' },
   { id: 'impasto', kind: D, name: 'Impasto oil', tool: 'knife', engine: 'paint', tip: 'bristle', size: 70, min: 0.6, opacity: 1, pOpacity: 0.2, flow: 1, bristles: 44, load: 0.45, pickup: 0.35, dry: 0.08, impasto: 1, hard: 0.7, spacing: 0.035, follow: true, smooth: 0.3, color: '#5b6a3c', desc: 'Thick paint with raised ridges and real light and shadow.' },
   { id: 'knife', kind: D, name: 'Palette knife', tool: 'knife', engine: 'paint', tip: 'flat', size: 60, min: 0.8, opacity: 1, pOpacity: 0.2, flow: 1, load: 0.4, pickup: 0.6, impasto: 0.9, hard: 0.95, spacing: 0.03, round: 0.22, follow: true, smooth: 0.4, color: '#c9b27a', desc: 'Scrape and spread flat slabs of paint. Great for blending big areas.' },
   { id: 'acrylic', kind: D, name: 'Acrylic brush', tool: 'flat', engine: 'paint', tip: 'bristle', size: 34, min: 0.5, opacity: 1, pOpacity: 0.3, flow: 1, bristles: 30, load: 0.65, pickup: 0.12, dry: 0.3, hard: 0.6, spacing: 0.04, round: 0.45, follow: true, smooth: 0.3, desc: 'Bold, opaque color with light brush marks.' },
@@ -82,6 +82,7 @@ export const PRESETS = [
   { id: 'splatter', kind: D, name: 'Splatter', tool: 'spray', engine: 'splat', size: 60, min: 0.5, opacity: 1, flow: 1, smooth: 0.1, desc: 'Flicked paint drops.' },
   // ---- blending
   { id: 'smudge', kind: B, name: 'Finger smudge', tool: 'finger', engine: 'paint', tip: 'round', size: 40, min: 0.6, opacity: 1, pOpacity: 0.5, flow: 1, load: 0, pickup: 0.85, soften: 0.3, hard: 0.3, spacing: 0.05, grain: 0.15, smooth: 0.3, desc: 'Drag colors with your fingertip. Works on everything: pencil, charcoal, pastel and paint.' },
+  { id: 'smoother', kind: B, name: 'Smoothing brush', tool: 'brush', engine: 'paint', tip: 'round', size: 70, min: 0.7, opacity: 1, pOpacity: 0.3, flow: 0.9, load: 0, pickup: 0.65, soften: 0.9, hard: 0, spacing: 0.035, grain: 0, smooth: 0.45, desc: 'Melts any colors from any brush into smooth, even blends. Go over an edge between two colors to make a soft gradient.' },
   { id: 'blender', kind: B, name: 'Soft blender', tool: 'brush', engine: 'paint', tip: 'round', size: 60, min: 0.6, opacity: 1, pOpacity: 0.5, flow: 0.8, load: 0, pickup: 0.5, soften: 0.45, hard: 0.1, spacing: 0.05, smooth: 0.35, desc: 'A clean soft brush that melts colors together into smooth gradients.' },
   { id: 'paint-blend', kind: B, name: 'Bristle blender', tool: 'brush', engine: 'paint', tip: 'bristle', size: 50, min: 0.6, opacity: 1, pOpacity: 0.4, flow: 1, bristles: 40, load: 0, pickup: 0.6, dry: 0, hard: 0.5, spacing: 0.04, follow: true, smooth: 0.3, desc: 'Blends paint with visible brush marks, like a clean oil brush.' },
   { id: 'water-brush', kind: B, name: 'Water brush', tool: 'waterbrush', engine: 'paint', tip: 'round', size: 50, min: 0.5, opacity: 1, pOpacity: 0.4, flow: 0.8, load: 0, pickup: 0.45, wet: 0.45, lift: 0.1, soften: 0.6, hard: 0.2, spacing: 0.05, grain: 0.3, smooth: 0.35, desc: 'Clean water. Melts watercolor pencil and paint, softens edges and lifts a little color.' },
@@ -275,13 +276,13 @@ export class Stroke {
       // each hair is a streak running along the stroke; drying hairs fade and skip
       g.fillStyle = '#000';
       const avg = this.hairs.reduce((s, h) => s + Math.max(0, h.load), 0) / this.hairs.length;
-      if (avg > 0.45) { g.globalAlpha = Math.min(0.7, (avg - 0.45) * 1.6); g.fillRect(-r, -r * 0.92, D, r * 1.84); } // a loaded brush has a solid core
+      if (avg > 0.45) { g.globalAlpha = Math.min(0.42, (avg - 0.45) * 1.2); g.fillRect(-r, -r * 0.92, D, r * 1.84); } // a loaded brush has a solid core
       for (const h of this.hairs) {
         let a = Math.min(1, Math.max(0, h.load * 1.3));
         if (h.load < 0.4 && noise1(h.ph + this.dist * 0.01 * h.f) > h.load * 2.4) a *= 0.08;
         if (a < 0.02) continue;
-        const w = Math.max(0.7, D / this.hairs.length * h.w * 1.25);
-        g.globalAlpha = a * (0.75 + h.sh * 0.25);
+        const w = Math.max(0.7, D / this.hairs.length * h.w * 0.95);
+        g.globalAlpha = a * (0.4 + h.sh * 0.6);
         g.fillRect(-r, h.off * r * 0.96 - w / 2, D, w);
       }
       g.globalAlpha = 1; g.globalCompositeOperation = 'destination-in'; env(b.hard ?? 0.6); g.globalCompositeOperation = 'source-over';
@@ -296,12 +297,8 @@ export class Stroke {
 
   paintDab(x, y, s, p) {
     const b = this.b, N = MIXN, D = Math.max(3, Math.ceil(s) + 2), r = D / 2;
-    const src = this.o.sampleSrc || this.o.layerCtx?.canvas; // the layer as it was before this stroke, so the brush meets the real wet paint
-    // 1. what is under the brush, shrunk to the mixing grid
-    const sg = this.sampG; sg.clearRect(0, 0, N, N);
-    if (b.sampleAll !== false && this.o.below) sg.drawImage(this.o.below, x - r, y - r, D, D, 0, 0, N, N);
-    if (src) sg.drawImage(src, x - r, y - r, D, D, 0, 0, N, N);
-    const S = sg.getImageData(0, 0, N, N).data, buf = this.buf;
+    // 1. what is under the brush, on the mixing grid
+    const S = this.sampleUnder(x - r, y - r, D), buf = this.buf;
     // 2. mix it into the paint on the brush, then load fresh paint
     // rates are per distance travelled, so spacing does not change how a brush mixes
     const kStep = Math.max(0.01, Math.min(1, (b.spacing || 0.05) / 0.8));
@@ -330,7 +327,7 @@ export class Stroke {
       if (depl) A *= 1 - depl;
       buf[j] = c0; buf[j + 1] = c1; buf[j + 2] = c2; buf[j + 3] = A;
     }
-    if (blurAmt > 0) this.blurBuf(blurAmt);
+    if (blurAmt > 0) { this.blurBuf(blurAmt); if (blurAmt > 0.5) this.blurBuf(blurAmt - 0.4); }
     const img = this.bufImg.data;
     for (let i = 0; i < N * N; i++) {
       const j = i * 4; let o0 = buf[j], o1 = buf[j + 1], o2 = buf[j + 2];
@@ -340,8 +337,9 @@ export class Stroke {
     this.bufG.putImageData(this.bufImg, 0, 0);
     // 3. the tip mask: shape, hairs, paper grain
     if (this.hairs) for (const h of this.hairs) h.load -= (b.spacing * s) * 0.0009 * (b.dry || 0) * (1.4 - h.w * 0.4) * (40 / Math.max(10, b.size)) * 1.5;
-    const key = D + '|' + (this.hairs ? Math.floor(this.dist / Math.max(2, s * 0.15)) : 0) + (b.tip === 'chalk' ? '|' + (this.rnd() * 4 | 0) : '');
-    if (key !== this.tipKey || b.dry) { this.buildTip(D); this.tipKey = key; }
+    // the tip is only redrawn when its size changes or the hairs have dried a little more
+    const key = Math.round(D / 2) + '|' + (this.hairs ? Math.floor(this.dist / Math.max(3, s * 0.35)) : 0) + (b.tip === 'chalk' ? '|' + (Math.floor(this.dist / Math.max(3, s * 0.2)) % 4) : '');
+    if (key !== this.tipKey) { this.buildTip(D); this.tipKey = key; }
     const m = this.maskC; if (m.width < D || m.height < D) { m.width = D; m.height = D; }
     const mg = m.getContext('2d');
     mg.setTransform(1, 0, 0, 1, 0, 0); mg.globalCompositeOperation = 'copy'; mg.globalAlpha = 1;
@@ -362,8 +360,7 @@ export class Stroke {
     const dc = this.dabC; if (dc.width < D || dc.height < D) { dc.width = D; dc.height = D; }
     const dg = dc.getContext('2d');
     dg.globalCompositeOperation = 'copy'; dg.imageSmoothingEnabled = true; dg.imageSmoothingQuality = 'high';
-    dg.filter = blurAmt > 0 ? `blur(${(blurAmt * D * 0.02).toFixed(1)}px)` : 'none';
-    dg.drawImage(this.bufC, 0, 0, N, N, 0, 0, D, D); dg.filter = 'none';
+    dg.drawImage(this.bufC, 0, 0, N, N, 0, 0, D, D);
     dg.globalCompositeOperation = 'destination-in'; dg.drawImage(m, 0, 0, D, D, 0, 0, D, D);
     // 5. put it on the layer
     const st0 = Math.min(0.999, b.opacity * b.flow * this.strengthAt(p) * (1 - (b.wet || 0) * 0.75));
@@ -378,9 +375,37 @@ export class Stroke {
     this.grow(x, y, r);
   }
 
+  // The page under the brush. A fixed source (the page before this stroke) is read once in 256 px tiles
+  // and kept, so painting never waits on the graphics card. A live source (makers, previews) is read directly.
+  sampleUnder(x0, y0, D) {
+    const N = MIXN, b = this.b, S = this.S || (this.S = new Uint8ClampedArray(N * N * 4));
+    const src = this.o.sampleSrc;
+    if (!src) {
+      const sg = this.sampG; sg.clearRect(0, 0, N, N);
+      if (b.sampleAll !== false && this.o.below) sg.drawImage(this.o.below, x0, y0, D, D, 0, 0, N, N);
+      if (this.o.layerCtx) sg.drawImage(this.o.layerCtx.canvas, x0, y0, D, D, 0, 0, N, N);
+      S.set(sg.getImageData(0, 0, N, N).data); return S;
+    }
+    const W = src.width, H = src.height, T = 256, tiles = this.tiles || (this.tiles = new Map());
+    const sctx = this.srcCtx || (this.srcCtx = src.getContext('2d'));
+    const tile = (tx, ty) => { const k = tx + ',' + ty; let t = tiles.get(k); if (!t) { const w = Math.min(T, W - tx * T), h = Math.min(T, H - ty * T); t = { w, d: sctx.getImageData(tx * T, ty * T, w, h).data }; tiles.set(k, t); } return t; };
+    const step = D / N, off = step * 0.5;
+    // two samples per cell (center and a quarter step away) for smoother color
+    for (let j = 0; j < N; j++) {
+      const py = Math.floor(y0 + off + j * step);
+      for (let i = 0; i < N; i++) {
+        const o = (j * N + i) * 4, px = Math.floor(x0 + off + i * step);
+        if (px < 0 || py < 0 || px >= W || py >= H) { S[o] = S[o + 1] = S[o + 2] = S[o + 3] = 0; continue; }
+        const t = tile(px >> 8, py >> 8), q = (((py & 255) * t.w) + (px & 255)) * 4, d = t.d;
+        S[o] = d[q]; S[o + 1] = d[q + 1]; S[o + 2] = d[q + 2]; S[o + 3] = d[q + 3];
+      }
+    }
+    return S;
+  }
+
   blurBuf(k) {
     // a light box blur on the paint grid, weighted by paint amount
-    const N = MIXN, buf = this.buf, out = new Float32Array(buf.length), w = Math.min(0.9, k);
+    const N = MIXN, buf = this.buf, out = (this.buf2 && this.buf2.length === buf.length) ? this.buf2 : new Float32Array(buf.length), w = Math.min(0.9, k);
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       let s0 = 0, s1 = 0, s2 = 0, sa = 0, n = 0;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
@@ -391,7 +416,7 @@ export class Stroke {
       out[j] = buf[j] * (1 - w) + (s0 / sa) * w; out[j + 1] = buf[j + 1] * (1 - w) + (s1 / sa) * w; out[j + 2] = buf[j + 2] * (1 - w) + (s2 / sa) * w;
       out[j + 3] = buf[j + 3] * (1 - w) + (sa / n) * w;
     }
-    this.buf = out;
+    this.buf2 = this.buf; this.buf = out;
   }
 
   // Call when the stroke ends: thick paint gets its light and shadow.
@@ -422,12 +447,17 @@ export function reliefLight(ctx, heightCanvas, bbox, amount = 1) {
   const x0 = Math.max(0, Math.floor(bbox[0]) - 2), y0 = Math.max(0, Math.floor(bbox[1]) - 2), x1 = Math.min(W, Math.ceil(bbox[2]) + 2), y1 = Math.min(H, Math.ceil(bbox[3]) + 2);
   const w = x1 - x0, h = y1 - y0; if (w < 3 || h < 3) return;
   const hd = heightCanvas.getContext('2d').getImageData(x0, y0, w, h).data, id = ctx.getImageData(x0, y0, w, h), d = id.data;
-  const Hm = new Float32Array(w * h); for (let i = 0; i < w * h; i++) Hm[i] = hd[i * 4 + 3] / 255;
-  const k = 300 * amount;
+  const Hm = new Float32Array(w * h); let hmax = 0;
+  for (let i = 0; i < w * h; i++) { Hm[i] = hd[i * 4 + 3] / 255; if (Hm[i] > hmax) hmax = Hm[i]; }
+  if (hmax <= 0) return;
+  // only the ridges inside the paint get light and shadow; the outer edge of the stroke is left alone (no outline)
+  const k = 140 * amount;
   for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
     const i = y * w + x; if (d[i * 4 + 3] < 8 || Hm[i] <= 0) continue;
+    const inner = Math.min(Hm[i - 1], Hm[i + 1], Hm[i - w], Hm[i + w], Hm[i]) / hmax;
+    const wgt = Math.max(0, Math.min(1, (inner - 0.45) / 0.35)); if (wgt <= 0) continue;
     const dx = Hm[i + 1] - Hm[i - 1], dy = Hm[i + w] - Hm[i - w];
-    const l = (-dx - dy) * k, spec = Math.max(0, l - 30) * 0.7;
+    const l = Math.max(-40, Math.min(40, (-dx - dy) * k / hmax)) * wgt, spec = Math.max(0, l - 18) * 0.5;
     for (let c = 0; c < 3; c++) d[i * 4 + c] = Math.max(0, Math.min(255, d[i * 4 + c] + l + spec));
   }
   ctx.putImageData(id, x0, y0);

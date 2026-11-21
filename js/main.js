@@ -9,7 +9,8 @@ import { openFactory, openMakers, seedStarters } from './stickers.js';
 import { STARTERS } from './makers.js';
 import { openDither } from './dither.js';
 import { openPaperMaker, loadCustomPapers } from './papermaker.js';
-import { importFiles, assetGrid, SYSTEM_FONTS, loadAllFonts, MEDIA_ACCEPT } from './library.js';
+import { importFiles, assetGrid, assetURL, SYSTEM_FONTS, loadAllFonts, MEDIA_ACCEPT } from './library.js';
+import { makeThumb } from './render.js';
 import { el, $, toast, modal, confirmBox, promptBox, slider, select, colorInput, check, numberInput, pickFiles, saveFile, chooseExportFolder, fmtBytes, safeName } from './ui.js';
 
 const THEMES = { desk: "Artist's desk", studio: 'Digital studio', minimal: 'Minimal', scrap: 'Scrapbook', pro: 'Illustration studio' };
@@ -21,7 +22,7 @@ const BOOK_KEYS = [
   ['1 to 9, 0', 'Camera angles: angled, top, low, front, left, right, left page, right page, spine, page edges'],
   ['F', 'Flick through the pages like a flip book (F again stops)'], ['Shift + F', 'Flick backwards'],
   ['C', 'Free camera on or off'], ['W A S D', 'Free camera: move'], ['Q / E', 'Free camera: down / up'], ['Shift', 'Free camera: move faster'], ['Drag', 'Free camera: look around'], ['Esc', 'Leave free camera'],
-  ['R', 'Start or stop recording the view'], ['K or ?', 'This list'],
+  ['R', 'Start or stop recording the view'], ['T', 'Open the sticker tray (drag stickers onto the book)'], ['K or ?', 'This list'],
 ];
 
 const app = {
@@ -156,6 +157,7 @@ const app = {
       el('span', { class: 'grow' }),
       el('button', { class: 'btn', onclick: () => this.pagesDialog() }, 'Pages'),
       el('button', { class: 'btn', onclick: () => this.customize() }, 'Customize'),
+      el('button', { class: 'btn', title: 'Drag your stickers, made pieces, art and GIFs onto the cover or any page (T)', onclick: () => this.stickerTray() }, '★ Stickers'),
       this.flickBtn,
       el('button', { class: 'btn', onclick: () => openExport(this, b, { tab: 'video', pageIndex: this.currentPage() }) }, 'Export'),
       this.recBtn = el('button', { class: 'btn', title: 'Record the view while you flip (R)', onclick: () => this.toggleRecord() }, '● Record'),
@@ -166,6 +168,19 @@ const app = {
     stage.append(this.viewPad, this.freeHint);
     root.append(bar, stage, el('div', { class: 'book-hint muted small' }, 'Click a page edge or drag a corner to turn. Double-click a page to draw on it. Right-drag to look around, scroll to zoom. Press K for all keys.'));
     this.book3d = new Book3D(stage, { quality: this.settings.quality, reducedMotion: this.settings.reducedMotion });
+    this.stage = stage; this.trayOpen = false;
+    // drop a sticker straight onto the book
+    stage.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('application/x-shesketches-asset')) { e.preventDefault(); stage.classList.add('drop-on'); } });
+    stage.addEventListener('dragleave', () => stage.classList.remove('drop-on'));
+    stage.addEventListener('drop', async e => {
+      stage.classList.remove('drop-on');
+      const id = e.dataTransfer.getData('application/x-shesketches-asset'); if (!id) return;
+      e.preventDefault();
+      const a = await db.get('assets', id); if (!a) return;
+      const hit = this.book3d.hitAt(e.clientX, e.clientY);
+      if (!hit) return toast('Drop it on the cover or on a page.');
+      this.placeAsset(a, hit, e.clientX, e.clientY);
+    });
     this.book3d.on('pos', () => this.updatePos(posLbl));
     this.book3d.on('openPage', i => this.openEditor(i));
     this.book3d.on('camera', () => this.updPad());
@@ -174,7 +189,7 @@ const app = {
     await this.book3d.setBook(b);
     this.updatePos(posLbl); this.updPad();
     this.bookKeys = e => {
-      if (this.editor || e.target.closest('input, textarea, select') || document.querySelector('.modal-back:not(:has(.side))')) return;
+      if (this.editor || e.target.closest?.('input, textarea, select') || document.querySelector('.modal-back:not(:has(.side))')) return;
       const B = this.book3d, k = e.key.toLowerCase();
       if (B.free) {
         if (['w', 'a', 's', 'd', 'q', 'e', 'shift'].includes(k)) { B.keysDown.add(k); e.preventDefault(); return; }
@@ -188,6 +203,7 @@ const app = {
       else if (k === 'f') this.flick(e.shiftKey ? -1 : 1);
       else if (k === 'c') B.setFree(!B.free);
       else if (k === 'r') this.toggleRecord();
+      else if (k === 't') this.stickerTray();
       else if (k === 'k' || e.key === '?') this.bookKeysPanel();
       else if (/^[0-9]$/.test(k)) B.viewTo(VIEW_KEYS[(+k + 9) % 10]);
     };
@@ -230,6 +246,66 @@ const app = {
     const dot = this.viewPad.querySelector('.vp-dot'); dot.style.left = (50 + Math.sin(r) * rad * 46) + '%'; dot.style.top = (50 - Math.cos(r) * rad * 46) + '%';
     if (this.padZoom && document.activeElement !== this.padZoom) this.padZoom.value = a.d;
   },
+  // ---------- sticker tray ----------
+  async stickerTray(kinds) {
+    const was = this.stage.querySelector('.sticker-tray');
+    if (was) { was.remove(); this.trayOpen = false; if (!kinds) return; }
+    kinds ||= ['sticker', 'made'];
+    this.trayOpen = true;
+    const grid = el('div', { class: 'st-grid' });
+    const fill = async ks => {
+      grid.innerHTML = '';
+      const list = (await db.all('assets')).filter(a => ks.includes(a.kind)).sort((a, b) => b.created - a.created);
+      if (!list.length) grid.append(el('p', { class: 'muted small', style: { gridColumn: '1 / -1' } }, 'Nothing here yet. Make stickers in the Sticker factory or Makers, or import art.'));
+      for (const a of list) {
+        const img = el('img', { alt: a.name }); assetURL(a).then(u => img.src = u);
+        const it = el('div', { class: 'st-item', draggable: 'true', title: a.name + '. Drag onto the book, or click to put it on the page you see.' }, img);
+        it.addEventListener('dragstart', e => { e.dataTransfer.setData('application/x-shesketches-asset', a.id); e.dataTransfer.effectAllowed = 'copy'; if (img.complete) e.dataTransfer.setDragImage(img, 40, 40); });
+        it.addEventListener('click', () => {
+          const B = this.book3d, [l, r] = B.spread();
+          const hit = B.pos === 0 ? { kind: 'cover', x: 0.5, y: 0.5 } : r != null ? { kind: 'page', idx: r, x: 0.5, y: 0.5 } : l != null ? { kind: 'page', idx: l, x: 0.5, y: 0.5 } : null;
+          if (!hit) return toast('Open the book to a page, or close it to the cover.');
+          const rc = this.stage.getBoundingClientRect(); this.placeAsset(a, hit, rc.left + rc.width / 2, rc.top + rc.height / 2);
+        });
+        grid.append(it);
+      }
+    };
+    const tab = (label, ks) => el('button', { class: 'btn small', onclick: e => { tray.querySelectorAll('.st-tabs .btn').forEach(b => b.classList.remove('lit')); e.target.classList.add('lit'); fill(ks); } }, label);
+    const tray = el('div', { class: 'sticker-tray' },
+      el('div', { class: 'st-head' }, el('b', {}, 'Stickers and pieces'), el('button', { class: 'icon-btn tiny', title: 'Close (T)', onclick: () => { tray.remove(); this.trayOpen = false; } }, '✕')),
+      el('p', { class: 'muted small', style: { margin: '6px 10px 0' } }, 'Drag one onto the cover or any page. Then press "Edit it" or double-click the page to move it, resize it or change its look.'),
+      el('div', { class: 'st-tabs' }, tab('Stickers', ['sticker', 'made']), tab('My art', ['art']), tab('GIFs', ['media']), tab('All', ['sticker', 'made', 'art', 'media']),
+        el('button', { class: 'btn small', onclick: () => openFactory(null, () => fill(['sticker', 'made'])) }, '+ New')),
+      grid);
+    tray.querySelector('.st-tabs .btn').classList.add('lit');
+    this.stage.append(tray);
+    fill(kinds);
+  },
+  async ensureCoverPage() {
+    const b = this.book;
+    if (!b.coverPage) { const p = newPageData(b, 0); p.layers[0].name = 'Cover art'; p.paper = { type: 'smooth', color: b.cover.color }; await db.put('pages', p); b.coverPage = p.id; await db.put('books', b); }
+    return db.get('pages', b.coverPage);
+  },
+  async placeAsset(a, hit, cx, cy) {
+    const b = this.book, cover = hit.kind === 'cover';
+    const page = cover ? await this.ensureCoverPage() : await db.get('pages', b.pages[hit.idx]);
+    const s = Math.min(1, (page.w * (cover ? 0.4 : 0.32)) / a.w, (page.h * 0.4) / a.h);
+    const L = { id: uid('l_'), name: a.name || 'Sticker', kind: 'image', src: a.blob, asset: a.id, media: a.media || null, iw: a.w, ih: a.h, x: hit.x * page.w, y: hit.y * page.h, scale: s, rot: (Math.random() - 0.5) * 0.15, visible: true, opacity: 1, blend: 'source-over', locked: false, filter: {}, shadow: { on: true, blur: 10, dx: 4, dy: 6, color: '#000000', a: 0.3 }, fx: a.kind === 'sticker' ? { finish: 'satin', finishAmt: 0.35 } : null };
+    page.layers.push(L);
+    page.ver = Math.max(2, (page.ver || 1) + 1); page.updated = Date.now();
+    page.thumb = await putBlob(await makeThumb(page, b, 2048));
+    await db.put('pages', page);
+    if (cover) { const pos = this.book3d.pos; await this.book3d.setBook(b); this.book3d.goTo(pos); } else this.book3d.invalidatePage(page.id);
+    // a little popup to edit or undo right away
+    document.querySelector('.place-pop')?.remove();
+    const pop = el('div', { class: 'place-pop', style: { left: cx + 'px', top: cy + 'px' } },
+      el('span', {}, cover ? 'On the cover.' : `On page ${hit.idx + 1}.`),
+      el('button', { class: 'btn small primary', onclick: async () => { pop.remove(); if (cover) await this.openEditor(-1, b.coverPage); else await this.openEditor(hit.idx); const ed = this.editor; if (ed) { ed.setTool('move'); ed.selectOnly(L.id); } } }, 'Edit it'),
+      el('button', { class: 'btn small', onclick: async () => { pop.remove(); const p2 = await db.get('pages', page.id); p2.layers = p2.layers.filter(l => l.id !== L.id); p2.ver++; p2.thumb = null; await db.put('pages', p2); if (cover) { const pos = this.book3d.pos; await this.book3d.setBook(b); this.book3d.goTo(pos); } else this.book3d.invalidatePage(p2.id); } }, 'Undo'));
+    document.body.append(pop);
+    setTimeout(() => pop.remove(), 8000);
+  },
+
   bookKeysPanel() {
     modal('Keys and controls', el('div', { class: 'keys' },
       el('p', { class: 'muted' }, 'Everything here also has a button. The camera pad at the bottom right aims the camera with one click.'),
@@ -314,6 +390,11 @@ const app = {
         slider('Wear and age', c.wear ?? 0.25, 0, 1, 0.01, v => { c.wear = v; apply(); }, v => Math.round(v * 100) + '%'),
         slider('Board thickness', c.thickness || 1, 0.4, 3, 0.05, v => { c.thickness = v; apply(); }, v => v.toFixed(2) + '×'),
         select('Metal corners', c.corners && c.corners !== 0.02 ? c.corners : 'none', { none: 'None', gold: 'Gold', silver: 'Silver', brass: 'Brass', black: 'Black' }, v => { c.corners = v; apply(); }),
+        el('h3', {}, 'Stickers on the cover'),
+        el('div', { class: 'row wrap' },
+          el('button', { class: 'btn small primary', onclick: () => { show(0, 'cover')(); this.stickerTray(['sticker', 'made']); } }, '★ Drag stickers onto it'),
+          el('button', { class: 'btn small', onclick: () => this.editCover() }, 'Move and style them')),
+        help("Open the tray and drag any sticker onto the cover. \"Move and style them\" opens the cover in the editor, where you can move, resize, lock and change each sticker's look: border, gloss, holo, glitter, texture and more."),
         el('h3', {}, 'Cover art'),
         el('div', { class: 'row wrap' },
           el('button', { class: 'btn small primary', onclick: () => this.editCover() }, '✎ Draw my own cover'),

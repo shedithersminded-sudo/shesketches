@@ -5,6 +5,7 @@ A realistic virtual sketchbook and art studio that runs in your browser.
 - Pick from 16 kinds of books (classic, chunky journal, pocket, watercolor, spiral, flip book, black paper and more), then change the size, pages, paper thickness, cover, corners, title, page edges, desk and light. Flip through it in 3D, flick it like a flip book, or fly around it with a free camera.
 - Draw on any page or the cover with 36 brushes: pencils, colored and watercolor pencils, charcoal, pastels, inks, oils, acrylic, gouache, watercolor, markers and more. Paints mix like real paint, and blenders smudge, soften and melt colors. Every setting explains itself, and you can make your own brushes. Pen pressure works.
 - Full layers (lock, clip, protect transparent, merge, drag to reorder), undo, redo and a history you can jump through.
+- Drag your stickers straight onto the cover or any page, then give each one its own look: die-cut border, gloss, holographic, glitter, gold foil, puffy, paper or fabric texture, wrinkles, wear or a peeling corner.
 - Put GIFs and short videos on pages. They play in the book and in exported videos.
 - Make your own paper: tooth, fibers, speckles, creases, aged edges, ruled, grid or dot lines.
 - Import your own art, cut things out with the sticker factory, and build torn paper, cardboard frames, lace, doilies, lockets, tape, stamps and tickets in the makers. Everything comes out with no background.

@@ -2,6 +2,7 @@
 // The 3D book never feeds back into this: exports always come from here at full resolution.
 import { getBlob, db } from './db.js';
 import { paintPaper } from './paper.js';
+import { applyFx, hasFx } from './stickerfx.js';
 
 const bmpCache = new Map(); // blobId -> ImageBitmap (small LRU)
 const MAX_BMP = 48;
@@ -136,7 +137,10 @@ export function drawLayer(ctx, L, res, S = 1) {
     if (f !== 'none') ctx.filter = f;
     if (L.kind === 'image') {
       const src = frameOf(res[L.id], L);
-      if (src) ctx.drawImage(src, -sz.w / 2, -sz.h / 2, sz.w, sz.h);
+      if (src && L.fx && hasFx(L.fx)) { // sticker look (border, finish, texture...)
+        const r = applyFx(src, L.fx, L.src + (isAnimated(res[L.id]) ? ':' + res[L.id].frames.indexOf(src) : '')), k = sz.w / r.w0;
+        ctx.drawImage(r.canvas, -sz.w / 2 - r.pad * k, -sz.h / 2 - r.pad * k, r.canvas.width * k, r.canvas.height * k);
+      } else if (src) ctx.drawImage(src, -sz.w / 2, -sz.h / 2, sz.w, sz.h);
     } else {
       ctx.font = fontString(L); ctx.textBaseline = 'top';
       if (L.spacing) try { ctx.letterSpacing = (L.spacing * 1) + 'px'; } catch (e) { }

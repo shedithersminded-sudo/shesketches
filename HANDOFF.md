@@ -74,6 +74,19 @@ Never commit personal art or other people's photos into the repo. Everything shi
 - Media: GIFs, animated WEBP/PNG and short videos as page layers, playing in the editor, the book and exported videos.
 - Paper maker + 8 more papers (dot grid, ruled, graph, toned gray/tan, mixed media, crumpled).
 
+## Stickers everywhere (done)
+- `js/stickerfx.js`: sticker looks applied at draw time (original file untouched, cached): die-cut border, finishes (gloss, satin, matte, holo, glitter, metal, vinyl), material textures, puffy, wrinkles, wear, peeling corner, tint. 11 one-click presets. Shown in the editor Picture panel as "Sticker look", every setting explained.
+- Sticker tray: book view button "★ Stickers" (key T) and editor dock "Stickers" (key K). Drag a piece onto the 3D cover or any page (Book3D.hitAt raycasts to the page and spot) or click to place it on the page you see. A popup offers "Edit it" or "Undo". Cover stickers live on the cover page (book.coverPage).
+- Customize > Cover has "Drag stickers onto it" and "Move and style them".
+
+## Speed and quick controls (done)
+- Paint brushes no longer read pixels back from the GPU every dab. The page under the brush (layer before the stroke + layers below) is read once in 256 px tiles per stroke (Stroke.sampleUnder). Soften works on the 48x48 paint grid, no canvas blur filter. Bristle tips redraw only every third of a brush width. Gouache stroke went from about 3.4 s to 0.27 s in the test harness.
+- Undo keeps only the "before" pixels (after is captured on undo) and drops old steps past about 360 MB. Autosave waits until you stop drawing. Layer thumbnails are cached.
+- Thick paint light only touches ridges inside the paint (no bright outline around strokes).
+- Quick menu: right-click (or hold right button, or Q) on the page. Every numeric brush setting with a short label, tools, undo/redo, swap colors, recent brushes, colors. Right-drag pans. Alt+scroll = size, Alt+Shift+scroll = strength. Dock has Size, Strength, Mix and a Quick button.
+- Shortcuts keep working after touching a slider (sliders lose focus, only text fields block keys).
+- Smoothing brush (blend kind). Blenders also listed in the Draw tool under "Blenders and smoothing".
+
 ## Measured
 - Rendering the book: about 1.7 ms per frame. A 200-page book opens in under 1 s; jumping to any page is instant
   (only the 4 visible sheets load textures).

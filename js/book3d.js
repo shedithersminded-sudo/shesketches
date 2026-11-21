@@ -722,6 +722,31 @@ export class Book3D {
     this.canvas.addEventListener('pointercancel', up);
   }
 
+  // What is under the mouse: a page (with x, y from 0 to 1 on it) or the front cover.
+  hitAt(clientX, clientY) {
+    const r = this.canvas.getBoundingClientRect(), ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1), this.camera);
+    const objs = [];
+    for (const s of this.slots) if (s.front.visible) objs.push(s.front, s.back);
+    if (this.coverMesh) objs.push(this.coverMesh);
+    const hits = ray.intersectObjects(objs, false);
+    for (const h of hits) {
+      if (h.object === this.coverMesh) {
+        if (this.thetaOf(-1) > 0.3) continue; // only the outside of a closed cover
+        const loc = this.coverMesh.worldToLocal(h.point.clone()), W = this.W + this.over, H = this.H + this.over * 2;
+        if (loc.y < this.coverT * 0.5) continue;
+        return { kind: 'cover', x: Math.max(0, Math.min(1, loc.x / W)), y: Math.max(0, Math.min(1, (loc.z + H / 2) / H)) };
+      }
+      const s = this.slots.find(q => q.front === h.object || q.back === h.object); if (!s || !h.uv) continue;
+      // front meshes only answer when seen from the front, back meshes from the back
+      const side = h.object === s.front ? 'front' : 'back';
+      const idx = s.leaf * 2 + (side === 'back' ? 1 : 0);
+      if (idx < 0 || idx >= this.book.pages.length) continue;
+      return { kind: 'page', idx, x: h.uv.x, y: 1 - h.uv.y };
+    }
+    return null;
+  }
+
   pageAt(p) {
     if (this.pos === 0) return null;
     const [l, r] = this.spread();
