@@ -1,0 +1,10 @@
+{
+  "name": "SHESKETCHES",
+  "short_name": "SHESKETCHES",
+  "description": "A realistic virtual sketchbook and art studio. Everything stays on your PC.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#171311",
+  "theme_color": "#171311",
+  "icons": [{ "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
