@@ -175,6 +175,28 @@ const shade = (hex, k) => { const [r, g, b] = rgb(hex); return k > 0 ? toHex(r +
 
 // ---------- paint mixing ----------
 // RYB model (Sugita & Takahashi): mixing in red-yellow-blue gives painter's results (blue + yellow = green).
+// same math as rgb2ryb / ryb2rgb, but writing into OUT instead of making a new array (millions of calls per stroke)
+const OUT = new Float64Array(3);
+function rgb2rybIn(r, g, b) {
+  const w = Math.min(r, g, b); r -= w; g -= w; b -= w;
+  const mg = Math.max(r, g, b);
+  let y = Math.min(r, g); r -= y; g -= y;
+  if (b > 0 && g > 0) { b /= 2; g /= 2; }
+  y += g; b += g;
+  const my = Math.max(r, y, b);
+  if (my > 0) { const n = mg / my; r *= n; y *= n; b *= n; }
+  OUT[0] = r + w; OUT[1] = y + w; OUT[2] = b + w;
+}
+function ryb2rgbIn(r, y, b) {
+  const w = Math.min(r, y, b); r -= w; y -= w; b -= w;
+  const my = Math.max(r, y, b);
+  let g = Math.min(y, b); y -= g; b -= g;
+  if (b > 0 && g > 0) { b *= 2; g *= 2; }
+  r += y; g += y;
+  const mg = Math.max(r, g, b);
+  if (mg > 0) { const n = my / mg; r *= n; g *= n; b *= n; }
+  OUT[0] = r + w; OUT[1] = g + w; OUT[2] = b + w;
+}
 export function rgb2ryb(r, g, b) {
   const w = Math.min(r, g, b); r -= w; g -= w; b -= w;
   const mg = Math.max(r, g, b);
@@ -249,6 +271,7 @@ export class Stroke {
    */
   constructor(preset, target, opts) {
     this.b = fullBrush(preset); this.g = target; this.o = opts;
+    if (this.b.engine === 'paint') this.b.spacing = Math.max(this.b.spacing || 0.05, 0.07);
     this.color = opts.color || preset.color || '#222222';
     this.dist = 0; this.last = null; this.residual = 0;
     this.seed = Math.random() * 1e6 | 0;
@@ -258,7 +281,11 @@ export class Stroke {
     if (this.b.engine === 'paint') this.initPaint();
   }
   rnd() { this.seed = (this.seed * 16807) % 2147483647; return this.seed / 2147483647; }
-  grow(x, y, r) { const b = this.bbox; b[0] = Math.min(b[0], x - r); b[1] = Math.min(b[1], y - r); b[2] = Math.max(b[2], x + r); b[3] = Math.max(b[3], y + r); }
+  grow(x, y, r) {
+    const b = this.bbox; b[0] = Math.min(b[0], x - r); b[1] = Math.min(b[1], y - r); b[2] = Math.max(b[2], x + r); b[3] = Math.max(b[3], y + r);
+    // the area changed since the editor last copied the work onto the layer
+    const d = this.dirtyBox || (this.dirtyBox = [1e9, 1e9, -1e9, -1e9]); d[0] = Math.min(d[0], x - r); d[1] = Math.min(d[1], y - r); d[2] = Math.max(d[2], x + r); d[3] = Math.max(d[3], y + r);
+  }
   sizeAt(p) { const b = this.b; return b.size * (b.min + (1 - b.min) * Math.pow(p, 1.2)); }
   strengthAt(p) { return 1 - this.b.pOpacity * (1 - Math.min(1, p * 1.25)); }
 
@@ -328,16 +355,17 @@ export class Stroke {
 
   // ---------- wet paint ----------
   initPaint() {
-    const b = this.b, N = MIXN;
+    const b = this.b, N = this.N = Math.max(16, Math.min(MIXN, Math.ceil(b.size * 0.9) + 2)); // small brushes need a smaller mixing grid
     this.mixRYB = b.mixMode !== 'light';
     this.buf = new Float32Array(N * N * 4); // color (ryb or rgb) + amount, per cell
     const K = this.toSpace(this.color);
     const a0 = b.load > 0 ? 1 : 0;
     for (let i = 0; i < N * N; i++) { this.buf[i * 4] = K[0]; this.buf[i * 4 + 1] = K[1]; this.buf[i * 4 + 2] = K[2]; this.buf[i * 4 + 3] = a0; }
     this.K = K;
-    this.bufC = mk(N, N); this.bufG = this.bufC.getContext('2d'); this.bufImg = this.bufG.createImageData(N, N);
+    // small work canvases stay in memory: drawing tiny pictures there is much faster than on the graphics card
+    this.bufC = mk(N, N, true); this.bufG = this.bufC.getContext('2d'); this.bufImg = this.bufG.createImageData(N, N);
     this.samp = mk(N, N, true); this.sampG = this.samp.getContext('2d', { willReadFrequently: true });
-    this.dabC = mk(8, 8); this.maskC = mk(8, 8); this.tipC = mk(8, 8); this.grC = mk(8, 8);
+    this.dabC = mk(8, 8, true); this.maskC = mk(8, 8, true); this.tipC = mk(8, 8, true); this.grC = mk(8, 8, true);
     if (HAIR_SHAPES.has(b.tip)) {
       const n = Math.round(b.tip === 'rake' ? Math.max(4, Math.min(14, (b.bristles || 24) / 3)) : (b.bristles || 24)); this.hairs = [];
       for (let i = 0; i < n; i++) this.hairs.push({ off: (i + this.rnd() * 0.8) / n * 2 - 1, load: 0.8 + this.rnd() * 0.4, w: 0.5 + this.rnd(), ph: this.rnd() * 100, f: 0.6 + this.rnd() * 0.8, sh: this.rnd() });
@@ -386,7 +414,7 @@ export class Stroke {
   }
 
   paintDab(x, y, s, p) {
-    const b = this.b, N = MIXN, D = Math.max(3, Math.ceil(s) + 2), r = D / 2;
+    const b = this.b, N = this.N, D = Math.max(3, Math.ceil(s) + 2), r = D / 2;
     // 1. what is under the brush, on the mixing grid
     const S = this.sampleUnder(x - r, y - r, D), buf = this.buf;
     // 2. mix it into the paint on the brush, then load fresh paint
@@ -407,7 +435,7 @@ export class Stroke {
         const tot = wb + wu;
         if (wu > 0.0005 && tot > 0) {
           let u0 = S[j] / 255, u1 = S[j + 1] / 255, u2 = S[j + 2] / 255;
-          if (ryb) [u0, u1, u2] = rgb2ryb(u0, u1, u2);
+          if (ryb) { rgb2rybIn(u0, u1, u2); u0 = OUT[0]; u1 = OUT[1]; u2 = OUT[2]; }
           c0 = (c0 * wb + u0 * wu) / tot; c1 = (c1 * wb + u1 * wu) / tot; c2 = (c2 * wb + u2 * wu) / tot;
         }
         A = Math.min(1, A * Math.max(0, 1 - (1 - keep) * fadeK) + wu);
@@ -423,8 +451,9 @@ export class Stroke {
     if (blurAmt > 0) { this.blurBuf(blurAmt); if (blurAmt > 0.5) this.blurBuf(blurAmt - 0.4); }
     const img = this.bufImg.data;
     for (let i = 0; i < N * N; i++) {
-      const j = i * 4; let o0 = buf[j], o1 = buf[j + 1], o2 = buf[j + 2];
-      if (ryb) [o0, o1, o2] = ryb2rgb(o0, o1, o2);
+      const j = i * 4; if (buf[j + 3] < 0.002) { img[j + 3] = 0; continue; } // empty cell: nothing to convert
+      let o0 = buf[j], o1 = buf[j + 1], o2 = buf[j + 2];
+      if (ryb) { ryb2rgbIn(o0, o1, o2); o0 = OUT[0]; o1 = OUT[1]; o2 = OUT[2]; }
       img[j] = o0 * 255; img[j + 1] = o1 * 255; img[j + 2] = o2 * 255; img[j + 3] = buf[j + 3] * 255;
     }
     this.bufG.putImageData(this.bufImg, 0, 0);
@@ -442,7 +471,7 @@ export class Stroke {
       const gc = this.grC; if (gc.width < D || gc.height < D) { gc.width = D; gc.height = D; }
       const gg = gc.getContext('2d'); gg.globalCompositeOperation = 'copy'; gg.drawImage(m, 0, 0);
       gg.globalCompositeOperation = 'destination-in';
-      const pat = gg.createPattern(this.grain, 'repeat'), scl = this.o.grainScale || 1;
+      const pat = this.grainPat || (this.grainPat = gg.createPattern(this.grain, 'repeat')), scl = this.o.grainScale || 1;
       pat.setTransform(new DOMMatrix().scale(scl).translate(-(x - r) / scl, -(y - r) / scl));
       gg.fillStyle = pat; gg.fillRect(0, 0, D, D);
       const gAmt = Math.max(0, b.grain * (1 - Math.min(0.85, p * (b.wax || 0) * 0.6)));
@@ -471,7 +500,7 @@ export class Stroke {
   // The page under the brush. A fixed source (the page before this stroke) is read once in 256 px tiles
   // and kept, so painting never waits on the graphics card. A live source (makers, previews) is read directly.
   sampleUnder(x0, y0, D) {
-    const N = MIXN, b = this.b, S = this.S || (this.S = new Uint8ClampedArray(N * N * 4));
+    const N = this.N || MIXN, b = this.b, S = this.S || (this.S = new Uint8ClampedArray(N * N * 4));
     const src = this.o.sampleSrc;
     if (!src) {
       const sg = this.sampG; sg.clearRect(0, 0, N, N);
@@ -481,15 +510,16 @@ export class Stroke {
     }
     const W = src.width, H = src.height, T = 256, tiles = this.tiles || (this.tiles = new Map());
     const sctx = this.srcCtx || (this.srcCtx = src.getContext('2d'));
-    const tile = (tx, ty) => { const k = tx + ',' + ty; let t = tiles.get(k); if (!t) { const w = Math.min(T, W - tx * T), h = Math.min(T, H - ty * T); t = { w, d: sctx.getImageData(tx * T, ty * T, w, h).data }; tiles.set(k, t); } return t; };
+    const tile = (tx, ty) => { const k = tx * 65536 + ty; let t = tiles.get(k); if (!t) { const w = Math.min(T, W - tx * T), h = Math.min(T, H - ty * T); t = { w, d: sctx.getImageData(tx * T, ty * T, w, h).data }; tiles.set(k, t); } return t; };
     const step = D / N, off = step * 0.5;
-    // two samples per cell (center and a quarter step away) for smoother color
     for (let j = 0; j < N; j++) {
-      const py = Math.floor(y0 + off + j * step);
+      const py = Math.floor(y0 + off + j * step), rowOff = (py & 255);
+      let lastTx = -1, t = null, d = null, tw = 0;
       for (let i = 0; i < N; i++) {
         const o = (j * N + i) * 4, px = Math.floor(x0 + off + i * step);
         if (px < 0 || py < 0 || px >= W || py >= H) { S[o] = S[o + 1] = S[o + 2] = S[o + 3] = 0; continue; }
-        const t = tile(px >> 8, py >> 8), q = (((py & 255) * t.w) + (px & 255)) * 4, d = t.d;
+        const tx = px >> 8; if (tx !== lastTx) { t = tile(tx, py >> 8); d = t.d; tw = t.w; lastTx = tx; } // same tile for most of a row
+        const q = (rowOff * tw + (px & 255)) * 4;
         S[o] = d[q]; S[o + 1] = d[q + 1]; S[o + 2] = d[q + 2]; S[o + 3] = d[q + 3];
       }
     }
@@ -498,16 +528,20 @@ export class Stroke {
 
   blurBuf(k) {
     // a light box blur on the paint grid, weighted by paint amount
-    const N = MIXN, buf = this.buf, out = (this.buf2 && this.buf2.length === buf.length) ? this.buf2 : new Float32Array(buf.length), w = Math.min(0.9, k);
+    // same 3 x 3 blur as before, done as a row pass then a column pass (fewer reads per cell)
+    const N = this.N || MIXN, buf = this.buf, out = (this.buf2 && this.buf2.length === buf.length) ? this.buf2 : new Float32Array(buf.length), w = Math.min(0.9, k);
+    const tmp = (this.blurTmp && this.blurTmp.length === buf.length) ? this.blurTmp : (this.blurTmp = new Float32Array(buf.length));
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { // rows: premultiplied color and paint amount
+      let s0 = 0, s1 = 0, s2 = 0, sa = 0;
+      for (let dx = -1; dx <= 1; dx++) { const xx = x + dx < 0 ? 0 : x + dx >= N ? N - 1 : x + dx, j = (y * N + xx) * 4, a = buf[j + 3] + 1e-4; s0 += buf[j] * a; s1 += buf[j + 1] * a; s2 += buf[j + 2] * a; sa += a; }
+      const o = (y * N + x) * 4; tmp[o] = s0; tmp[o + 1] = s1; tmp[o + 2] = s2; tmp[o + 3] = sa;
+    }
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-      let s0 = 0, s1 = 0, s2 = 0, sa = 0, n = 0;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const xx = Math.min(N - 1, Math.max(0, x + dx)), yy = Math.min(N - 1, Math.max(0, y + dy)), j = (yy * N + xx) * 4, a = buf[j + 3] + 1e-4;
-        s0 += buf[j] * a; s1 += buf[j + 1] * a; s2 += buf[j + 2] * a; sa += a; n++;
-      }
+      let s0 = 0, s1 = 0, s2 = 0, sa = 0;
+      for (let dy = -1; dy <= 1; dy++) { const yy = y + dy < 0 ? 0 : y + dy >= N ? N - 1 : y + dy, j = (yy * N + x) * 4; s0 += tmp[j]; s1 += tmp[j + 1]; s2 += tmp[j + 2]; sa += tmp[j + 3]; }
       const j = (y * N + x) * 4;
       out[j] = buf[j] * (1 - w) + (s0 / sa) * w; out[j + 1] = buf[j + 1] * (1 - w) + (s1 / sa) * w; out[j + 2] = buf[j + 2] * (1 - w) + (s2 / sa) * w;
-      out[j + 3] = buf[j + 3] * (1 - w) + (sa / n) * w;
+      out[j + 3] = buf[j + 3] * (1 - w) + (sa / 9) * w;
     }
     this.buf2 = this.buf; this.buf = out;
   }

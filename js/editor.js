@@ -94,7 +94,8 @@ export class Editor {
     for (const L of P.layers) await this.ensureRes(L);
     this.updAnim();
     this.stroke = mk(P.w, P.h); this.strokeCtx = this.stroke.getContext('2d');
-    this.pre = mk(P.w, P.h);
+    // the brush reads the page under it from these, so they live in memory (fast to read)
+    this.pre = mk(P.w, P.h); this.pre.getContext('2d', { willReadFrequently: true });
     this.activeId = (P.layers.slice().reverse().find(l => l.kind === 'paint') || P.layers[P.layers.length - 1] || {}).id;
     this.selection = new Set(); this.primary = null;
     this.title.textContent = this.coverMode ? this.partLabel : `Page ${this.idx + 1} of ${this.book.pages.length}`;
@@ -246,7 +247,15 @@ export class Editor {
     const g = this.canvas.getContext('2d'), dpr = devicePixelRatio || 1, P = this.page;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, this.vw, this.vh);
-    const split = this.hasAnim && !this.stroking && !this.pointerDown ? motionSplit(P.layers, this.res) : null;
+    // Speed: the finished page is drawn once into screen-sized pictures and reused.
+    // Only what is changing right now is drawn every frame: the layer you paint on, or moving GIFs.
+    const LS = P.layers, liveEdit = this.stroking || (this.pointerDown && this.tool === 'move' && this.moveMode === 'layer');
+    let split = null;
+    if (liveEdit) {
+      const ai = LS.findIndex(l => l.id === this.activeId), ok = ai >= 0 && !LS[ai].clip && !(LS[ai + 1] && LS[ai + 1].clip) && LS.slice(ai + 1).every(l => !l.visible || (l.blend || 'source-over') === 'source-over');
+      split = ok ? { a0: ai, a1: ai } : null;
+    } else if (this.hasAnim) split = motionSplit(LS, this.res);
+    else split = { a0: LS.length, a1: LS.length - 1 }; // nothing is changing: cache the whole page
     const pageBase = (gg, layers, withPaper) => {
       if (withPaper) {
         gg.save(); gg.shadowColor = 'rgba(0,0,0,0.45)'; gg.shadowBlur = 30; gg.shadowOffsetY = 10;
@@ -256,7 +265,7 @@ export class Editor {
       gg.beginPath(); gg.rect(0, 0, P.w, P.h); gg.clip();
       gg.imageSmoothingEnabled = true; gg.imageSmoothingQuality = this.z < 1 ? 'high' : 'medium';
       if (withPaper) gg.drawImage(this.paperCanvas, 0, 0);
-      drawLayers(gg, layers, this.res, this.z, P.w, P.h, layers === P.layers ? hook : null, Math.min(1, this.z * dpr));
+      if (layers.length) drawLayers(gg, layers, this.res, this.z, P.w, P.h, hook, Math.min(1, this.z * dpr));
       gg.restore();
     };
     const hook = (L, ctx, clipped) => {
@@ -268,16 +277,17 @@ export class Editor {
     this.renderTime = performance.now();
     if (split) {
       // still layers are drawn once into two screen-sized pictures; only the moving layers are drawn each frame
-      const key = [this.z, this.px, this.py, this.vw, this.vh, dpr, this.contentVer || 0, JSON.stringify(P.layers)].join('|');
+      const key = [split.a0, split.a1, this.z, this.px, this.py, this.vw, this.vh, dpr, this.contentVer || 0, JSON.stringify(P.layers)].join('|');
       if (key !== this.animKey) {
-        const mkC = () => { const c = document.createElement('canvas'); c.width = this.canvas.width; c.height = this.canvas.height; const cg = c.getContext('2d'); cg.setTransform(dpr, 0, 0, dpr, 0, 0); return [c, cg]; };
-        const [b, bg] = mkC(); pageBase(bg, P.layers.slice(0, split.a0), true);
-        const [a, ag] = mkC(); pageBase(ag, P.layers.slice(split.a1 + 1), false);
+        // reuse the same two canvases (no new memory every stroke)
+        const mkC = k => { let c = this['_cache' + k]; if (!c || c.width !== this.canvas.width || c.height !== this.canvas.height) { c = this['_cache' + k] = document.createElement('canvas'); c.width = this.canvas.width; c.height = this.canvas.height; } const cg = c.getContext('2d'); cg.setTransform(1, 0, 0, 1, 0, 0); cg.clearRect(0, 0, c.width, c.height); cg.setTransform(dpr, 0, 0, dpr, 0, 0); return [c, cg]; };
+        const [b, bg] = mkC('B'); pageBase(bg, P.layers.slice(0, split.a0), true);
+        const above = P.layers.slice(split.a1 + 1), [a, ag] = above.length ? mkC('A') : [null, null]; if (above.length) pageBase(ag, above, false);
         this.animBelow = b; this.animAbove = a; this.animKey = key;
       }
       g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(this.animBelow, 0, 0); g.restore();
-      pageBase(g, P.layers.slice(split.a0, split.a1 + 1), false);
-      g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(this.animAbove, 0, 0); g.restore();
+      if (split.a1 >= split.a0) pageBase(g, P.layers.slice(split.a0, split.a1 + 1), false);
+      if (split.a1 < LS.length - 1) { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(this.animAbove, 0, 0); g.restore(); }
     } else {
       this.animKey = null;
       pageBase(g, P.layers, true);
@@ -599,7 +609,7 @@ export class Editor {
     if (b.engine === 'paint' && b.sampleAll !== false) {
       const i = this.page.layers.indexOf(L);
       if (i > 0) {
-        this.belowC ||= mk(this.page.w, this.page.h);
+        if (!this.belowC) { this.belowC = mk(this.page.w, this.page.h); this.belowC.getContext('2d', { willReadFrequently: true }); }
         const bg = this.belowC.getContext('2d'); bg.clearRect(0, 0, this.page.w, this.page.h);
         drawLayers(bg, this.page.layers.slice(0, i), this.res, 1, this.page.w, this.page.h);
         bg.drawImage(this.pre, 0, 0);
@@ -608,7 +618,16 @@ export class Editor {
     }
     const paper = paperOf(this.page, this.book).type;
     const color = b.kind === 'blend' ? '#808080' : this.color;
-    const s = new Stroke(b, direct ? ctx : this.strokeCtx, { color, paper: paper === 'custom' ? 'sketch' : paper, layerCtx: ctx, sampleSrc, heightCtx: this.strokeCtx, alphaLock: !!L.alphaLock, grainScale: Math.max(0.5, Math.min(this.page.w, this.page.h) / 1700) });
+    // Paint and erase brushes work on a copy of the layer in memory (fast for many small touches);
+    // the changed area is copied onto the real layer once per pointer move.
+    let target = this.strokeCtx, workCtx = null;
+    if (direct) {
+      const W = this.page.w, H = this.page.h;
+      if (!this.work || this.work.width !== W || this.work.height !== H) { this.work = mk(W, H); this.workCtx = this.work.getContext('2d', { willReadFrequently: true }); this.heightC = mk(W, H); this.heightCtx = this.heightC.getContext('2d', { willReadFrequently: true }); }
+      workCtx = this.workCtx; workCtx.save(); workCtx.globalCompositeOperation = 'copy'; workCtx.drawImage(this.pre, 0, 0); workCtx.restore();
+      target = workCtx;
+    }
+    const s = new Stroke(b, target, { color, paper: paper === 'custom' ? 'sketch' : paper, layerCtx: workCtx || ctx, sampleSrc, heightCtx: direct ? this.heightCtx : this.strokeCtx, alphaLock: !!L.alphaLock, grainScale: Math.max(0.5, Math.min(this.page.w, this.page.h) / 1700) });
     this.stroking = true;
     const st = { s, L, sm: null, direct, name: b.name };
     this.strokeMove(st, e);
@@ -636,14 +655,22 @@ export class Editor {
     const k = Math.min(0.95, b.smooth || 0);
     st.sm = st.sm ? { x: st.sm.x + (p.x - st.sm.x) * (1 - k), y: st.sm.y + (p.y - st.sm.y) * (1 - k), p: st.sm.p + (pr - st.sm.p) * 0.5 } : { x: p.x, y: p.y, p: pr };
     st.s.add({ ...st.sm });
+    if (st.direct) this.flushWork(st);
     this.dirty = true;
+  }
+  // copy what the brush changed from the work copy onto the layer
+  flushWork(st, box) {
+    const d = box || st.s.dirtyBox; if (!d) return; if (!box) st.s.dirtyBox = null;
+    const W = this.page.w, H = this.page.h, x0 = Math.max(0, Math.floor(d[0]) - 2), y0 = Math.max(0, Math.floor(d[1]) - 2), x1 = Math.min(W, Math.ceil(d[2]) + 2), y1 = Math.min(H, Math.ceil(d[3]) + 2);
+    if (x1 <= x0 || y1 <= y0) return;
+    const g = this.layerCtx(st.L); g.clearRect(x0, y0, x1 - x0, y1 - y0); g.drawImage(this.work, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
   }
   endStroke(st) {
     if (!st) return;
     this.stroking = false; this.ropeView = null;
     const { s, L } = st, b = this.preset;
     const ctx = this.layerCtx(L);
-    s.finish(ctx);
+    if (st.direct) { s.finish(this.workCtx); this.flushWork(st, s.bbox); } else s.finish(ctx);
     const bb = s.bbox;
     const x0 = Math.max(0, Math.floor(bb[0]) - 4), y0 = Math.max(0, Math.floor(bb[1]) - 4), x1 = Math.min(this.page.w, Math.ceil(bb[2]) + 4), y1 = Math.min(this.page.h, Math.ceil(bb[3]) + 4);
     if (x1 <= x0 || y1 <= y0) { this.dirty = true; return; }
@@ -703,7 +730,8 @@ export class Editor {
       if (!this.res[en.id]) return;
       const [x, y, w, h] = en.rect, c = this.res[en.id].getContext('2d');
       if (dir < 0 && !en.after) { en.after = mk(w, h); en.after.getContext('2d').drawImage(this.res[en.id], x, y, w, h, 0, 0, w, h); }
-      c.save(); c.globalCompositeOperation = 'copy'; c.drawImage(dir < 0 ? en.before : en.after, 0, 0, w, h, x, y, w, h); c.restore();
+      // replace only this rectangle ('copy' would wipe the rest of the layer)
+      c.save(); c.clearRect(x, y, w, h); c.drawImage(dir < 0 ? en.before : en.after, 0, 0, w, h, x, y, w, h); c.restore();
       this.dirtyLayers.add(en.id);
     } else {
       this.page.layers = clone(dir < 0 ? en.before : en.after);
@@ -957,17 +985,22 @@ export class Editor {
     this.grpOpen ||= {};
     for (const [name, list] of this.brushGroups()) {
       const g = el('div', { class: 'brush-grid' });
-      let holder = wrap;
+      let holder = wrap, lazy = false;
       if (name) {
-        const has = list.some(p => p.id === this.curId);
-        const d = el('details', { class: 'sub bgrp', open: this.grpOpen[name] ?? has }, el('summary', {}, name, el('span', { class: 'muted small' }, ' ' + list.length)));
-        d.addEventListener('toggle', () => { this.grpOpen[name] = d.open; });
+        const has = list.some(p => p.id === this.curId), open = this.grpOpen[name] ?? has;
+        const d = el('details', { class: 'sub bgrp', open }, el('summary', {}, name, el('span', { class: 'muted small' }, ' ' + list.length)));
+        // closed groups fill in only when opened, so the panel builds fast
+        lazy = !open;
+        d.addEventListener('toggle', () => { this.grpOpen[name] = d.open; if (d.open && !g.childElementCount) fill(); });
         wrap.append(d); holder = d;
       }
+      const fill = () => {
       for (const p of list) {
         const c = this.previewCanvas(p);
         g.append(el('button', { class: 'brush' + (p.id === this.curId ? ' on' : ''), title: p.desc || p.name, onclick: () => { this.curId = p.id; if (p.color && this.tool === 'brush' && !this.userColor) this.color = p.color; this.renderPanels(); } }, c, el('span', {}, p.name)));
       }
+      };
+      if (!lazy) fill();
       holder.append(g);
     }
     wrap.append(el('div', { class: 'row wrap' },
@@ -987,7 +1020,7 @@ export class Editor {
   }
   previewStroke(ctx, p, w = 120, h = 36) {
     ctx.fillStyle = '#f3efe4'; ctx.fillRect(0, 0, w, h);
-    const lay = mk(w, h), lg = lay.getContext('2d');
+    const lay = mk(w, h), lg = lay.getContext('2d', { willReadFrequently: true }); // paint brushes read this back every dab
     if (p.kind === 'blend' || p.kind === 'erase') { // show it working on two colors
       lg.fillStyle = '#2f5d8a'; lg.fillRect(w * 0.08, h * 0.25, w * 0.42, h * 0.5); lg.fillStyle = '#e8b23a'; lg.fillRect(w * 0.5, h * 0.25, w * 0.42, h * 0.5);
     }
@@ -1534,7 +1567,7 @@ export class Editor {
     await this.save();
     document.removeEventListener('keydown', this.keyDown); document.removeEventListener('keyup', this.keyUp); window.removeEventListener('blur', this.onBlur);
     clearInterval(this.autoT); clearInterval(this.statusT); document.removeEventListener('visibilitychange', this.onHide); window.removeEventListener('pagehide', this.onHide);
-    this.closeQuick(); this.ro.disconnect();
+    this.closeQuick(); this.ro.disconnect(); for (const k of ['_cacheA', '_cacheB']) if (this[k]) { this[k].width = 0; this[k] = null; }
     this.root.remove(); this.root = null;
     this.res = null; this.stroke = null; this.pre = null; this.paperCanvas = null;
     this.app.onEditorClosed(this.idx);

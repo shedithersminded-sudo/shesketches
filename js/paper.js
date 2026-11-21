@@ -105,7 +105,7 @@ function fbm(N, base, oct, seed, gain = 0.5) {
   return out;
 }
 const rgb = h => { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
-const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d', { willReadFrequently: true }); return c; }; // paper tiles are built pixel by pixel
 
 // height map -> normal map canvas
 function normalMap(height, N, strength) {

@@ -4,7 +4,7 @@ import * as THREE from '../vendor/three.module.js';
 import { OrbitControls } from '../vendor/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/RoomEnvironment.js';
 import { coverTile, paperTile, deskTile, edgeTile, paintPaper, PAPERS } from './paper.js';
-import { getBlob, db } from './db.js';
+import { getBlob, putBlob, db } from './db.js';
 import { renderPage, paperOf, makeThumb, pageHasMotion, motionRenderer, loadRes } from './render.js';
 
 const SEG_X = 44, SEG_Y = 10;
@@ -697,7 +697,16 @@ export class Book3D {
   // ---------- textures ----------
   pageIndexFor(leaf, side) { return leaf * 2 + (side === 'back' ? 1 : 0); }
 
-  async pageTexture(idx) {
+  // one load per page at a time, even if several parts of the book ask for it together
+  pageTexture(idx) {
+    const id = this.book.pages[idx]; if (!id) return Promise.resolve(null);
+    this.texLoading ||= new Map();
+    const k = id + ':' + (this.hiRes || 0);
+    if (this.texLoading.has(k)) return this.texLoading.get(k);
+    const pr = this.pageTextureNow(idx).finally(() => this.texLoading.delete(k));
+    this.texLoading.set(k, pr); return pr;
+  }
+  async pageTextureNow(idx) {
     const id = this.book.pages[idx];
     if (!id) return null;
     const page = await db.get('pages', id);
@@ -710,7 +719,11 @@ export class Book3D {
       tex = new THREE.CanvasTexture(c);
     } else {
       let blob = page.thumb ? await getBlob(page.thumb) : null;
-      if (!blob) blob = await makeThumb(page, this.book, { max: 2048, balanced: 1536, performance: 1024 }[this.quality] || 1536);
+      if (!blob) {
+        blob = await makeThumb(page, this.book, { max: 2048, balanced: 1536, performance: 1024 }[this.quality] || 1536);
+        // keep it, so a blank page is only drawn once (big new books flip fast)
+        try { const fresh = await db.get('pages', id); if (fresh && !fresh.thumb && fresh.ver === page.ver) { fresh.thumb = await putBlob(blob); await db.put('pages', fresh); } } catch (_) { }
+      }
       const bm = await createImageBitmap(blob, { imageOrientation: 'flipY' });
       tex = new THREE.Texture(bm); tex.flipY = false; tex.needsUpdate = true;
     }

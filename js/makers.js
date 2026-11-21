@@ -3,7 +3,7 @@
 import { paperTile, coverTile, PAPERS } from './paper.js';
 import { Stroke, PRESETS, drawTool, impastoFinish } from './brushes.js';
 
-const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.round(w); c.height = Math.round(h); return c; };
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.round(w); c.height = Math.round(h); c.getContext('2d', { willReadFrequently: true }); return c; }; // these canvases are read back, so keep them in memory
 const rgb = h => { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
 const hexA = (h, a) => { const [r, g, b] = rgb(h); return `rgba(${r},${g},${b},${a})`; };
 const shade = (hex, k) => { const [r, g, b] = rgb(hex); const f = v => Math.max(0, Math.min(255, Math.round(k > 0 ? v + (255 - v) * k : v * (1 + k)))).toString(16).padStart(2, '0'); return '#' + f(r) + f(g) + f(b); };
