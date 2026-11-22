@@ -312,7 +312,7 @@ export class Book3D {
     }
     if (b.cover.ribbon && !this.spiral) {
       // a satin ribbon bookmark: a chain of points that drapes, sways and settles, drawn as a strip with a V-cut tail
-      const col = b.cover.ribbonColor || '#8a1010', N = 56;
+      const col = b.cover.ribbonColor || '#8a1010', N = 120; // enough joints to bend tightly over the page and cover edges
       const tex = new THREE.CanvasTexture(ribbonCanvas(col)); tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.colorSpace = THREE.SRGBColorSpace;
       const rm = new THREE.MeshPhysicalMaterial({ map: tex, color: '#ffffff', roughness: 0.38, sheen: 1, sheenRoughness: 0.3, sheenColor: new THREE.Color(col).offsetHSL(0, 0, 0.35), side: THREE.DoubleSide });
       const len = this.H + 0.26, pos = new Float32Array(N * 3 * 3), uv = new Float32Array(N * 3 * 2), idx = [];
@@ -661,26 +661,46 @@ export class Book3D {
     const L = this.L, t = this.t, T = this.coverT, base = Math.max(0, this.pos - 1), H = this.H;
     const closed = this.pos === 0 || this.pos > L;
     const top = closed ? T + L * t * 0.5 : T + (L - 1 - base) * t + t * 3 + 0.0012;
+    // the ribbon's route after the page, as [z, y] points: page edge, cover board, cover edge, desk
+    const lie = 0.0015, edge = H / 2 + (this.over || 0) + 0.004;
+    // a short flat bit past the page corner first, so the bend clears the paper instead of cutting into it
+    // convex corners are padded outward so the straight links between joints pass over the paper and the board
+    const pad = 0.003, path = [[H / 2 - 0.004, top], [H / 2 + pad, top + pad * 0.6], [H / 2 + 0.012, T + lie + pad * 0.3], [edge - 0.004, T + lie], [edge + pad, T + lie + pad * 0.6], [edge + 0.014, lie]];
+    let pathLen = 0; for (let k = 1; k < path.length; k++) pathLen += Math.hypot(path[k][0] - path[k - 1][0], path[k][1] - path[k - 1][1]);
+    R.coverTop = T + lie; R.coverEdge = edge;
     for (let i = 0; i < R.N; i++) {
       const along = i / (R.N - 1) * R.len, r = R.rest[i];
-      if (along <= H) { r.x = 0.03 + along * 0.025; r.y = top; r.z = -H / 2 + along; r.pin = true; }
-      else {
-        const over = along - H, drop = top, curl = Math.max(0, over - drop * 1.15) * 0.18;
-        r.x = 0.03 + H * 0.025 + curl; r.pin = false;
-        if (over < drop * 1.15) { r.y = Math.max(0.0015, top - over * 0.88); r.z = H / 2 + over * 0.45; }
-        else { r.y = 0.0015; r.z = H / 2 + drop * 0.52 + (over - drop * 1.15) * 0.98; }
+      if (along <= H - 0.004) { r.x = 0.03 + along * 0.025; r.y = top; r.z = -H / 2 + along; r.pin = true; continue; }
+      // past the page: down onto the cover board, across its overhang, over its edge and out onto the desk
+      // the drape over the page and cover edges is held by them (pinned); only the tail on the desk swings
+      let d = along - (H - 0.004); r.pin = d < pathLen; r.x = 0.03 + H * 0.025;
+      for (let k = 1; k < path.length; k++) {
+        const a = path[k - 1], b = path[k], seg = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (d <= seg || k === path.length - 1) { const f = seg ? Math.min(1, d / seg) : 1; r.z = a[0] + (b[0] - a[0]) * f; r.y = a[1] + (b[1] - a[1]) * f; break; }
+        d -= seg;
       }
+      const onDesk = along - (H - 0.004) - pathLen; if (onDesk > 0) { r.z += onDesk * 0.98; r.x += onDesk * 0.18; }
     }
-    R.top = top; R.closed = closed; R.wake = 2.5; // keep simulating for a moment
+    R.top = top; R.closed = closed; R.wake = 2.5; R.settle = 0; // keep simulating for a moment
   }
-  kickRibbon(dir) { const R = this.rib; if (!R) return; for (let i = 0; i < R.N; i++) if (!R.rest[i].pin) { R.nodes[i].vx += dir * (0.25 + Math.random() * 0.25); R.nodes[i].vy += 0.12; } R.wake = 3; }
+  // a page turn makes the hanging part sway; the part lying flat on the desk only shifts a little
+  kickRibbon(dir) { const R = this.rib; if (!R) return; for (let i = 0; i < R.N; i++) if (!R.rest[i].pin) { const n = R.nodes[i], k = n.y < 0.004 ? 0.12 : 1; n.vx += dir * (0.25 + Math.random() * 0.25) * k; n.vy += 0.12 * k; } R.wake = 3; R.settle = 0; }
   ribbonStep(dt) {
     const R = this.rib; if (!R || !this.ribbon) return;
     if (!R.init) { R.nodes.forEach((n, i) => Object.assign(n, R.rest[i], { vx: 0, vy: 0, vz: 0 })); R.init = true; R.wake = 1; }
-    if (R.wake <= 0) return;
+    if (R.wake <= 0) {
+      // keep going until it is back at rest (up to 3 more seconds), so it never freezes mid-swing
+      if ((R.settle || 0) > 3) return;
+      let far = 0; for (let i = 0; i < R.N; i++) { const n = R.nodes[i], r = R.rest[i]; far = Math.max(far, Math.abs(n.x - r.x) + Math.abs(n.z - r.z)); }
+      if (far < 0.004) { R.settle = 99; return; }
+      R.settle = (R.settle || 0) + dt;
+    }
     R.wake -= dt; R.t += dt;
     const N = R.N, seg = R.len / (N - 1), nodes = R.nodes, H = this.H, W = this.W;
     const n0 = nodes[0]; Object.assign(n0, R.rest[0]);
+    // small steps: the stiff springs overshoot and wobble if one step covers a slow frame
+    const steps = Math.ceil(dt / 0.006), full = dt; dt = full / steps;
+    for (let sI = 0; sI < steps; sI++) {
     for (let i = 1; i < N; i++) {
       const n = nodes[i], r = R.rest[i], k = r.pin ? 90 : 9;
       n.vx += (r.x - n.x) * k * dt; n.vy += (r.y - n.y) * k * dt - (r.pin ? 0 : 2.2 * dt); n.vz += (r.z - n.z) * k * dt;
@@ -691,9 +711,11 @@ export class Book3D {
     for (let i = 1; i < N; i++) {
       const a = nodes[i - 1], n = nodes[i], dx = n.x - a.x, dy = n.y - a.y, dz = n.z - a.z, d = Math.hypot(dx, dy, dz) || 1e-6;
       n.x = a.x + dx / d * seg; n.y = a.y + dy / d * seg; n.z = a.z + dz / d * seg;
-      const onBlock = Math.abs(n.z) < H / 2 + 0.002 && n.x > -W && n.x < W;
-      const floor = onBlock && !R.closed ? R.top : 0.0015;
-      if (n.y < floor) { n.y = floor; n.vy = Math.max(0, n.vy); n.vx *= 0.8; n.vz *= 0.8; }
+      const inX = n.x > -W - 0.05 && n.x < W + 0.05, onBlock = inX && Math.abs(n.z) < H / 2 + 0.002;
+      // the cover board sticks out past the pages: the ribbon rests on it, not inside it
+      const floor = onBlock && !R.closed ? R.top : inX && Math.abs(n.z) < R.coverEdge ? R.coverTop : 0.0015;
+      if (n.y < floor) { const f = Math.pow(0.9, dt * 60); n.y = floor; n.vy = Math.max(0, n.vy); n.vx *= f; n.vz *= f; }
+    }
     }
     this.ribbonMesh(); this.dirty = true;
   }
@@ -703,8 +725,9 @@ export class Book3D {
       const a = nodes[Math.max(0, i - 1)], b = nodes[Math.min(N - 1, i + 1)];
       let tx = b.x - a.x, ty = b.y - a.y, tz = b.z - a.z; const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
       // side = tangent x up, so the ribbon lies flat; a soft twist along the free tail
-      let sx = -tz, sy = 0, sz = tx; let sl = Math.hypot(sx, sz); if (sl < 0.2) { sx = 1; sz = 0; sl = 1; } sx /= sl; sz /= sl;
-      const free = R.rest[i].pin ? 0 : Math.min(1, (i / (N - 1) * R.len - this.H) * 4), tw = Math.sin(i * 0.08 + R.t * 0.8) * 0.12 * free;
+      // width runs along x (across the book), made square to the ribbon; stays steady when it hangs straight down
+      let sx = 1 - tx * tx, sy = -tx * ty, sz = -tx * tz; const sl = -(Math.hypot(sx, sy, sz) || 1); sx /= sl; sy /= sl; sz /= sl; // minus: same facing as before
+      const free = R.rest[i].pin ? 0 : Math.min(1, (i / (N - 1) * R.len - this.H) * 4), tw = Math.sin(i / (N - 1) * R.len * 3.5 + R.t * 0.8) * 0.12 * free;
       const ux = ty * sz - tz * sy, uy = tz * sx - tx * sz, uz = tx * sy - ty * sx, c = Math.cos(tw), s2 = Math.sin(tw);
       const qx = sx * c + ux * s2, qy = sy * c + uy * s2, qz = sz * c + uz * s2, n = nodes[i], lift = 0.0004;
       const set = (col, x, y, z) => { const o = (i * 3 + col) * 3; p[o] = x; p[o + 1] = y; p[o + 2] = z; };
