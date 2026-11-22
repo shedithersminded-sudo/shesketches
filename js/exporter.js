@@ -298,6 +298,7 @@ function cameraAt(book3d, cam, style, t, dur, aspect) {
   if (style === 'drift') { const k = 1 - 0.18 * Math.sin(u * PI); y *= k; z *= k; x = Math.sin(u * PI * 2) * W * 0.12; tx = x * 0.5; }
   if (style === 'hand') { x = Math.sin(t * 0.9) * 0.012 + Math.sin(t * 2.3) * 0.005; y += Math.sin(t * 1.3) * 0.01; tx = Math.sin(t * 0.7) * 0.008; }
   if (style === 'low') { y = d * 0.55; z = d * 0.85; }
+  if (style === 'spin') { const a = u * PI * 2; x = Math.sin(a) * d * 0.7; z = Math.cos(a) * d * 0.7; y = d * 0.62; }
   cam.position.set(x, y, z); cam.lookAt(tx, 0, tz); cam.updateProjectionMatrix();
 }
 async function withBook(app, book, fn) {
@@ -378,6 +379,24 @@ function videoJob(app, book, o) {
       if (audio) { const tl = res.tl; const ab = await flipSound(48000, tl.segs.filter(s => s.flip).map(s => s.t0), res.frames / o.fps, o.volume); await audio.add(ab); }
       await output.finalize(); prog(1);
       return { blob: new Blob([output.target.buffer], { type: o.format === 'webm' ? 'video/webm' : 'video/mp4' }), name: `${safeName(book.title)}-flip-${w}x${h}-${o.fps}fps.${o.format}`, expect: { kind: 'video', w, h, frames: res.frames, fps: o.fps, audio: !!audio, missing: res.missing } };
+    })
+  };
+}
+// a picture of the 3D book from the camera you have now, at any size
+function stillJob(app, book, o) {
+  return {
+    name: `3D picture ${o.w}×${o.h} ${o.format.toUpperCase()}`,
+    run: async (prog) => withBook(app, book, async b3 => {
+      const canvas = document.createElement('canvas'); canvas.width = o.w; canvas.height = o.h;
+      const r = b3.makeRenderer(canvas, true); r.setPixelRatio(1); r.setSize(o.w, o.h, false);
+      try {
+        const cam = b3.camera.clone(); cam.aspect = o.w / o.h; cam.updateProjectionMatrix();
+        b3.hiRes = o.detail; b3.texCache.forEach(t => t.dispose()); b3.texCache.clear(); b3.slots.forEach(s => s.texDirty = true);
+        b3.setState(b3.pos, null); await b3.refreshTextures(); prog(0.6);
+        r.render(b3.scene, cam);
+        const blob = await encodeImage(canvas, { format: o.format, q: 0.95, bg: 'paper' }, 72); prog(1);
+        return { blob, name: `${safeName(book.title)}-3d-${o.w}x${o.h}.${o.format}`, expect: { kind: o.format, w: o.w, h: o.h, dpi: o.format === 'png' ? 72 : 0, alpha: false, q: 0.95 } };
+      } finally { r.dispose(); }
     })
   };
 }
@@ -481,7 +500,7 @@ function projectJob(book) {
 // ---------- the dialog ----------
 export function openExport(app, book, { tab = 'artwork', pageIndex = 0 } = {}) {
   const N = book.pages.length;
-  const tabs = { artwork: 'Artwork', pdf: 'Print PDF', video: 'Flip-through video', gif: 'GIF', stickers: 'Stickers', project: 'Project file', history: 'History' };
+  const tabs = { artwork: 'Artwork', pdf: 'Print PDF', still: '3D picture', video: 'Flip-through video', gif: 'GIF', stickers: 'Stickers', project: 'Project file', history: 'History' };
   const head = el('div', { class: 'tabs' }), body = el('div', { class: 'export-body' });
   const state = {
     range: 'this', from: pageIndex + 1, to: pageIndex + 1,
@@ -489,6 +508,7 @@ export function openExport(app, book, { tab = 'artwork', pageIndex = 0 } = {}) {
     pdf: { dpi: 300, bleed: 0, marks: false, lossless: true, q: 0.95, bg: 'paper', layout: 'single', pnum: book.pageNumbers },
     vid: { format: 'mp4', res: '1080', w: 1920, h: 1080, fps: 30, bitrate: 16, hold: 1.4, flip: 1.1, introHold: 1.2, outroHold: 1.5, camera: 'angled', detail: 2048, sound: true, volume: 0.8, from: 0, to: Math.floor(N / 2) + 1 },
     gif: { mode: 'flip', w: 720, h: 450, fps: 15, colors: 256, loop: true, transparent: false, repeat: 3, from: 0, to: Math.min(Math.floor(N / 2) + 1, 4), hold: 0.8, flip: 0.9, introHold: 0.6, outroHold: 1, camera: 'angled', detail: 1024 },
+    still: { format: 'png', res: '2160', w: 3840, h: 2160, detail: 3072 },
     stk: { kind: 'sheet', wMM: 210, hMM: 297, dpi: 300, gapMM: 6, cellMM: 45, bg: 'transparent', bgColor: '#ffffff' },
   };
   let cur = tab;
@@ -531,6 +551,15 @@ export function openExport(app, book, { tab = 'artwork', pageIndex = 0 } = {}) {
         el('p', { class: 'muted small' }, 'Colors are RGB. Your print shop can convert to CMYK.'),
         go('Export PDF', () => { addJob(pdfJob(book, idxs(), { ...p })); toast('Added to the export queue.'); }));
     }
+    if (cur === 'still') {
+      const v = state.still, RES = { 1080: [1920, 1080, '1080p'], 1440: [2560, 1440, '1440p'], 2160: [3840, 2160, '4K'], sq: [2048, 2048, 'Square 2048'], vert: [2160, 3840, 'Tall 4K (phone wallpaper)'], custom: [v.w, v.h, 'Custom'] };
+      body.append(el('p', { class: 'muted' }, 'A picture of the 3D book from the camera you have now, with the desk and light. Move the camera first, then export.'),
+        select('Format', v.format, { png: 'PNG (lossless)', jpg: 'JPG', webp: 'WEBP' }, x => v.format = x),
+        select('Size', v.res, Object.fromEntries(Object.entries(RES).map(([k, r]) => [k, `${r[2]}${k === 'custom' ? '' : ` (${r[0]} × ${r[1]})`}`])), x => { v.res = x; if (x !== 'custom') { v.w = RES[x][0]; v.h = RES[x][1]; } draw(); }),
+        v.res === 'custom' ? el('div', { class: 'row' }, numberInput('Width', v.w, x => v.w = Math.round(x), { min: 64, max: 8192 }), numberInput('Height', v.h, x => v.h = Math.round(x), { min: 64, max: 8192 })) : null,
+        select('Page detail', String(v.detail), { 1024: 'Normal', 2048: 'High', 3072: 'Very high' }, x => v.detail = +x),
+        go('Export picture', () => { addJob(stillJob(app, book, { ...v })); toast('Added to the export queue.'); }));
+    }
     if (cur === 'video' || (cur === 'gif' && state.gif.mode === 'flip')) {
       const v = cur === 'video' ? state.vid : state.gif;
       const RES = { 1080: [1920, 1080, '1080p'], 1440: [2560, 1440, '1440p'], 2160: [3840, 2160, '4K'], 720: [1280, 720, '720p'], sq: [1080, 1080, 'Square 1080'], vert: [1080, 1920, 'Vertical 1080×1920 (Reels, TikTok)'], custom: [v.w, v.h, 'Custom'] };
@@ -551,7 +580,7 @@ export function openExport(app, book, { tab = 'artwork', pageIndex = 0 } = {}) {
         slider('Page turn time', v.flip, 0.08, 3, 0.02, x => { v.flip = x; updEst(); }, x => x + ' s'),
         slider('Hold at start', v.introHold, 0, 5, 0.1, x => { v.introHold = x; updEst(); }, x => x + ' s'),
         slider('Hold at end', v.outroHold, 0, 6, 0.1, x => { v.outroHold = x; updEst(); }, x => x + ' s'),
-        select('Camera', v.camera, { current: 'My current view in the book', angled: 'Angled, still', top: 'Straight down', low: 'Low angle', orbit: 'Slow orbit', drift: 'Slow drift in', hand: 'Handheld feel' }, x => v.camera = x),
+        select('Camera', v.camera, { current: 'My current view in the book', angled: 'Angled, still', top: 'Straight down', low: 'Low angle', orbit: 'Slow orbit', spin: 'Full spin around (360°)', drift: 'Slow drift in', hand: 'Handheld feel' }, x => v.camera = x),
         select('Page detail', String(v.detail), { 1024: 'Normal', 2048: 'High', 3072: 'Very high (for 4K)' }, x => v.detail = +x),
         cur === 'video' ? check('Page turn sounds', v.sound, x => { v.sound = x; draw(); }) : check('Loop forever', v.loop, x => v.loop = x),
         cur === 'video' && v.sound ? slider('Sound volume', v.volume, 0, 1, 0.05, x => v.volume = x, x => Math.round(x * 100) + '%') : null,
@@ -592,4 +621,4 @@ export function openExport(app, book, { tab = 'artwork', pageIndex = 0 } = {}) {
 export { verify, encodeGif };
 
 // used by the self-test (tests.html); not needed by the app itself
-export const _jobs = { artJob, pdfJob, videoJob, gifFlipJob, gifLayersJob, stickerJob, projectJob };
+export const _jobs = { artJob, pdfJob, stillJob, videoJob, gifFlipJob, gifLayersJob, stickerJob, projectJob };

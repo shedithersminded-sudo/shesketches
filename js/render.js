@@ -294,7 +294,7 @@ export function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgb
 export async function drawPaper(ctx, page, book, w, h) {
   const P = paperOf(page, book);
   const custom = P.type === 'custom' ? await customPaperImg(P.custom) : null;
-  paintPaper(ctx, w, h, P.type, P.color, custom, page.seed || 1);
+  paintPaper(ctx, w, h, P.type, P.color, custom, page.seed || 1, P.lines ? { kind: P.lines, color: P.lineColor || '#7c93b8', gap: P.lineGap || 0.03 } : null);
 }
 
 export function drawPageNumber(ctx, page, book, w, h, num) {

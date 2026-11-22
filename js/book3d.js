@@ -883,10 +883,12 @@ export class Book3D {
     this.anim = { from, to, t0: performance.now(), dur: full * Math.abs(to - from) / PI * 1000, dir };
     this.kickRibbon(dir);
     this.applyState(); this.refreshTextures();
+    this.emit('turn', { k, dir, dur: full });
   }
 
   finishTurn() {
-    const a = this.anim; this.anim = null;
+    const a = this.anim, k = this.turn?.k; this.anim = null;
+    this.emit('landed', { k, dir: a.dir });
     if (a.to === PI && a.dir > 0) this.pos++;
     else if (a.to === 0 && a.dir < 0) this.pos--;
     this.turn = null;
@@ -938,6 +940,7 @@ export class Book3D {
           const twist = Math.abs(zn) > 0.55 ? (zn < 0 ? 1 : -1) * Math.min(1, (Math.abs(zn) - 0.55) * 3) : 0;
           this.turn = { k: forward ? this.pos - 1 : this.pos - 2, theta: forward ? 0 : PI, dir: drag.dir, twist };
           this.applyState(); this.refreshTextures();
+          this.emit('turn', { k: this.turn.k, dir: drag.dir, dur: 0.7, hand: true });
         } else if (moved > 8) { drag = null; return; }
       }
       if (drag.started) {
@@ -1032,9 +1035,12 @@ export class Book3D {
     front: { name: 'Front', az: 0, el: 18, d: 1.05 }, left: { name: 'Left side', az: -62, el: 38, d: 1 }, right: { name: 'Right side', az: 62, el: 38, d: 1 },
     pageR: { name: 'Right page close', az: 8, el: 70, d: 0.62, tx: 0.5 }, pageL: { name: 'Left page close', az: -8, el: 70, d: 0.62, tx: -0.5 },
     spine: { name: 'Spine', az: -90, el: 14, d: 0.85, tx: 0 }, edge: { name: 'Page edges', az: 90, el: 12, d: 0.85, tx: 0.4 }, cover: { name: 'Cover close', az: 0, el: 55, d: 0.8, tx: 0.5 }, back: { name: 'Underneath', az: 180, el: 25, d: 1 },
+    shoulder: { name: 'Over the shoulder', az: -12, el: 44, d: 0.72, tx: 0.25 }, wide: { name: 'Wide', az: 25, el: 48, d: 1.7 },
+    corner: { name: 'Corner close', az: 40, el: 30, d: 0.5, tx: 0.85 }, topClose: { name: 'Top close', az: 0, el: 89, d: 0.55, tx: 0.5 },
   };
   viewTo(name, animate = true) {
     const v = Book3D.VIEWS[name]; if (!v) return;
+    if (this.spin) this.setSpin(false);
     this.view = name; this.orbitTo(v.az, v.el, v.d, v.tx || 0, animate);
   }
   // keepTarget: turn around the spot you are looking at now (camera pad, drags), not the middle of the book
@@ -1058,6 +1064,16 @@ export class Book3D {
     if (!this.book || !this.tall() || this.free || this.anim || this.camAnim) return;
     const closed = this.pos === 0;
     if (closed !== this.lastClosed) { const first = this.lastClosed === undefined; this.lastClosed = closed; if (!first) this.viewTo(this.view || 'angled'); }
+  }
+  // turntable: the camera slowly circles the book
+  setSpin(on) { this.spin = on ? 16 : 0; this.dirty = true; this.emit('spin', !!on); }
+  // saved views: where the camera is and what it looks at
+  getView() { return { p: this.camera.position.toArray(), t: this.controls.target.toArray() }; }
+  setView(v, animate = true) {
+    if (!v) return; if (this.free) this.setFree(false); if (this.spin) this.setSpin(false);
+    const p = new THREE.Vector3().fromArray(v.p), t = new THREE.Vector3().fromArray(v.t);
+    if (!animate || this.reducedMotion) { this.camAnim = null; this.camera.position.copy(p); this.controls.target.copy(t); this.controls.update(); this.dirty = true; return; }
+    this.camAnim = { p0: this.camera.position.clone(), t0: this.controls.target.clone(), p1: p, t1: t, s: performance.now(), dur: 650 };
   }
   orbitBy(daz, del) { const a = this.getAngles(); this.orbitTo(a.az + daz, a.el + del, a.d, 0, false, true); }
   getAngles() {
@@ -1164,6 +1180,7 @@ export class Book3D {
       this.camera.position.lerpVectors(c.p0, c.p1, e); this.controls.target.lerpVectors(c.t0, c.t1, e); this.controls.update();
       if (k >= 1) this.camAnim = null; this.dirty = true; this.emit('camera');
     }
+    if (this.spin && !this.camAnim && !this.free) this.orbitBy(this.spin * dt, 0);
     this.freeMove(dt);
     this.holdStep(dt);
     this.motionTick(now);

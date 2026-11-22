@@ -1,19 +1,20 @@
 // SHESKETCHES app shell: shelf, book view, customizing, settings and the welcome guide.
 import { db, uid, getSetting, setSetting, persist, usage, collectGarbage, unpackBook, getBlob, putBlob } from './db.js';
 import { createBook, addPages, removePages, deleteBook, newPageData, SIZES, BINDINGS, BOOK_TYPES, pagePx, SURFACES, surfaceSize } from './model.js';
-import { PAPERS, COVERS, DESKS } from './paper.js';
+import { PAPERS, COVERS, DESKS, LINE_KINDS, lineValues } from './paper.js';
 import { Book3D } from './book3d.js';
 import { Editor } from './editor.js';
 import { openExport, verify } from './exporter.js';
 import { openFactory, openMakers, seedStarters } from './stickers.js';
 import { STARTERS, STARTERS_2 } from './makers.js';
 import { openDither } from './dither.js';
+import { setSound, turnSound, landSound } from './sound.js';
 import { openPaperMaker, loadCustomPapers } from './papermaker.js';
 import { importFiles, assetGrid, assetURL, SYSTEM_FONTS, loadAllFonts, MEDIA_ACCEPT } from './library.js';
 import { makeThumb, canvasBlob, itemSize, loadRes } from './render.js';
 import { el, $, toast, modal, confirmBox, promptBox, slider, select, colorInput, check, numberInput, pickFiles, saveFile, chooseExportFolder, fmtBytes, safeName } from './ui.js';
 
-const THEMES = { desk: "Artist's desk", studio: 'Digital studio', minimal: 'Minimal', scrap: 'Scrapbook', pro: 'Illustration studio' };
+const THEMES = { noir: 'Noir (black, white and gray)', desk: "Artist's desk", studio: 'Digital studio', minimal: 'Minimal', scrap: 'Scrapbook', pro: 'Illustration studio' };
 const VIEW_KEYS = ['angled', 'top', 'low', 'front', 'left', 'right', 'pageL', 'pageR', 'spine', 'edge'];
 const BOOK_KEYS = [
   ['O', 'Turn the closed book over to see the back'], ['← / →', 'Turn the page back / forward'], ['Page Up / Page Down', 'Same as the arrows'], ['Home / End', 'Jump to the cover / the back'],
@@ -22,6 +23,7 @@ const BOOK_KEYS = [
   ['H', 'Pick the book up or put it down. Drag the desk to turn it in your hands'], ['G', 'Go to a page number'],
   ['1 to 9, 0', 'Camera angles: angled, top, low, front, left, right, left page, right page, spine, page edges'],
   ['F', 'Flick through the pages like a flip book (F again stops)'], ['Shift + F', 'Flick backwards'],
+  ['V', 'Spin: the camera slowly circles the book'], ['Shift + 1 to 3', 'Go to your saved views (save them in the camera pad)'],
   ['C', 'Free camera on or off'], ['W A S D', 'Free camera: move'], ['Q / E', 'Free camera: down / up'], ['Shift', 'Free camera: move faster'], ['Drag', 'Free camera: look around'], ['Esc', 'Leave free camera'],
   ['R', 'Start or stop recording the view'], ['T', 'Open the sticker tray (drag stickers onto the book)'], ['K or ?', 'This list'],
 ];
@@ -31,9 +33,12 @@ const app = {
   settings: {},
   async init() {
     this.settings = {
-      theme: await getSetting('theme', 'desk'), quality: await getSetting('quality', 'balanced'),
+      theme: await getSetting('theme', 'noir'), quality: await getSetting('quality', 'balanced'),
       reducedMotion: await getSetting('reducedMotion', matchMedia('(prefers-reduced-motion: reduce)').matches),
+      sounds: await getSetting('sounds', true), soundVol: await getSetting('soundVol', 0.7),
     };
+    setSound({ enabled: this.settings.sounds, volume: this.settings.soundVol });
+    if (!(await getSetting('noirOnce', false))) { await setSetting('noirOnce', true); this.settings.theme = 'noir'; await setSetting('theme', 'noir'); } // the new look, once for everyone
     document.documentElement.dataset.theme = this.settings.theme;
     persist();
     loadAllFonts();
@@ -192,8 +197,12 @@ const app = {
     this.book3d.on('openPage', i => this.openEditor(i));
     this.bindStickerDrag();
     this.book3d.on('camera', () => this.updPad());
+    this.book3d.on('spin', on => this.viewPad.querySelector('.spin-btn')?.classList.toggle('lit', on));
     this.book3d.on('free', on => { stage.classList.toggle('free', on); this.viewPad.querySelector('.free-btn').classList.toggle('lit', on); });
     this.book3d.on('hold', on => { this.holdBtn.classList.toggle('lit', on); this.holdBtn.textContent = on ? '✋ Put down' : '✋ Pick up'; });
+    const isCover = k => k === -1; // the front cover board
+    this.book3d.on('turn', t => turnSound(t.dur, isCover(t.k)));
+    this.book3d.on('landed', t => landSound(isCover(t.k)));
     this.book3d.on('flickEnd', () => this.flickBtn.textContent = '⏩ Flick');
     await this.book3d.setBook(b);
     this.updatePos(posLbl); this.updPad();
@@ -218,6 +227,8 @@ const app = {
       else if (k === 'r') this.toggleRecord();
       else if (k === 't') this.stickerTray();
       else if (k === 'k' || e.key === '?') this.bookKeysPanel();
+      else if (k === 'v') B.setSpin(!B.spin);
+      else if (e.shiftKey && /^Digit[1-3]$/.test(e.code)) B.setView(this.book.views?.[+e.code.slice(5) - 1]);
       else if (/^[0-9]$/.test(k)) B.viewTo(VIEW_KEYS[(+k + 9) % 10]);
     };
     this.bookKeysUp = e => { const B = this.book3d; if (B && B.keysDown) B.keysDown.delete(e.key.toLowerCase()); };
@@ -253,11 +264,21 @@ const app = {
     const pad = el('div', { class: 'view-pad' },
       el('div', { class: 'vp-head' }, el('b', {}, 'Camera'), el('button', { class: 'icon-btn tiny', title: 'Hide', onclick: () => pad.classList.toggle('min') }, '–')),
       el('div', { class: 'vp-body' }, dial,
-        el('div', { class: 'vp-grid' }, vb('angled', 'Angled'), vb('top', 'Top'), vb('low', 'Low'), vb('front', 'Front'), vb('left', 'Left'), vb('right', 'Right'), vb('pageL', 'L page'), vb('pageR', 'R page'), vb('spine', 'Spine'), vb('edge', 'Edges'), vb('cover', 'Cover'), vb('back', 'Under')),
+        el('div', { class: 'vp-grid' }, vb('angled', 'Angled'), vb('top', 'Top'), vb('low', 'Low'), vb('front', 'Front'), vb('left', 'Left'), vb('right', 'Right'), vb('pageL', 'L page'), vb('pageR', 'R page'), vb('spine', 'Spine'), vb('edge', 'Edges'), vb('cover', 'Cover'), vb('back', 'Under'), vb('shoulder', 'Shoulder'), vb('wide', 'Wide'), vb('corner', 'Corner'), vb('topClose', 'Top close')),
+        this.savedViews = el('div', { class: 'vp-saved' }),
         el('label', { class: 'vp-zoom' }, 'Zoom', zoom),
-        el('div', { class: 'row' }, el('button', { class: 'btn small free-btn', title: 'Fly around freely (C)', onclick: () => this.book3d.setFree(!this.book3d.free) }, '✈ Free camera'), el('button', { class: 'btn small', title: 'Back to the normal view', onclick: () => this.book3d.viewTo('angled') }, 'Reset'))));
+        el('div', { class: 'row' }, el('button', { class: 'btn small free-btn', title: 'Fly around freely (C)', onclick: () => this.book3d.setFree(!this.book3d.free) }, '✈ Free camera'), el('button', { class: 'btn small spin-btn', title: 'Slowly circle the book (V)', onclick: () => this.book3d.setSpin(!this.book3d.spin) }, '↻ Spin'), el('button', { class: 'btn small', title: 'Back to the normal view', onclick: () => this.book3d.viewTo('angled') }, 'Reset'))));
+    this.drawSavedViews();
     if (innerWidth < 700) pad.classList.add('min'); // small screens start with the camera pad folded away
     return pad;
+  },
+  // three camera spots per book: click to go there, Save to keep the view you have now
+  drawSavedViews() {
+    const box = this.savedViews; if (!box) return; box.innerHTML = '';
+    const b = this.book; b.views ||= [null, null, null];
+    b.views.forEach((v, i) => box.append(el('span', { class: 'vp-slot' },
+      el('button', { class: 'btn small' + (v ? '' : ' empty'), title: v ? `Go to saved view ${i + 1} (Shift + ${i + 1})` : 'Nothing saved yet', disabled: !v, onclick: () => this.book3d.setView(v) }, `View ${i + 1}`),
+      el('button', { class: 'icon-btn tiny', title: `Save the view you see now as view ${i + 1}`, onclick: async () => { b.views[i] = this.book3d.getView(); await db.put('books', b); this.drawSavedViews(); toast(`Saved view ${i + 1}.`); } }, '💾'))));
   },
   updPad() {
     if (!this.book3d || !this.viewPad) return;
@@ -300,16 +321,42 @@ const app = {
     this.stage.append(tray);
     fill(kinds);
   },
-  async ensureCoverPage() {
+  async ensureCoverPage(opts = {}) {
     const b = this.book;
-    if (!b.coverPage) { const p = newPageData(b, 0); p.layers[0].name = 'Cover art'; p.paper = { type: 'smooth', color: b.cover.color }; await db.put('pages', p); b.coverPage = p.id; await db.put('books', b); }
-    return db.get('pages', b.coverPage);
+    let p = b.coverPage && await db.get('pages', b.coverPage);
+    if (!p) { p = newPageData(b, 0); p.layers[0].name = 'Cover art'; p.paper = { type: 'smooth', color: b.cover.color }; await db.put('pages', p); b.coverPage = p.id; await db.put('books', b); }
+    this.coverLifted = await this.liftCover(p, opts.title);
+    return p;
   },
-  // ---------- move stickers right on the book ----------
-  // press on a sticker (or text) on a page, the covers or the desk and drag it; double-click it to open it in the editor
+  // Once the cover has its own page, the cover art and (when you open the editor) the printed title
+  // become normal layers on it, so you can see, move and edit them instead of drawing on top of them.
+  async liftCover(p, withTitle) {
+    const b = this.book, c = b.cover; let changed = false;
+    if (c.art) {
+      const bl = await getBlob(c.art);
+      if (bl) {
+        const im = await createImageBitmap(bl), full = c.artFit === 'full', inset = full ? 0 : (c.artInset ?? 0.12) * p.w;
+        const bw = p.w - inset * 2, bh = p.h - inset * 2, sc = full ? Math.max(bw / im.width, bh / im.height) : Math.min(bw / im.width, bh / im.height);
+        p.layers.splice(1, 0, { id: uid('l_'), name: 'Cover picture', kind: 'image', src: c.art, asset: null, media: null, iw: im.width, ih: im.height, x: p.w / 2, y: p.h / 2, scale: sc, rot: 0, visible: true, opacity: 1, blend: 'source-over', locked: false, filter: {}, shadow: { on: !full, blur: 12, dx: 0, dy: 4, color: '#000000', a: 0.35 } });
+        im.close?.();
+      }
+      c.art = null; changed = true;
+    }
+    if (withTitle && c.label) {
+      const st = c.titleStyle || 'printed', pos = c.titlePos || 'upper';
+      const color = st === 'foil-gold' ? '#d8b25a' : st === 'foil-silver' ? '#d9d9de' : st === 'label' ? (c.labelColor && c.labelColor !== '#efe6d2' ? c.labelColor : '#2a211a') : (c.labelColor || '#efe6d2');
+      p.layers.push({ id: uid('l_'), name: 'Title', kind: 'text', text: c.label, font: c.labelFont || 'Ink Free', size: Math.round(p.h * 0.055 * (c.titleSize || 1)), color, align: 'center', lineH: 1.2, weight: c.titleBold ? 700 : 400, italic: false, x: p.w / 2, y: p.h * { top: 0.12, upper: 0.32, center: 0.5, lower: 0.7, bottom: 0.9 }[pos], scale: 1, rot: 0, visible: true, opacity: 1, blend: 'source-over', locked: false, filter: {}, shadow: { on: st === 'printed', blur: 3, dx: 0, dy: 2, color: '#000000', a: 0.35 } });
+      c.label = ''; changed = true;
+    }
+    if (!changed) return false;
+    p.ver = Math.max(2, (p.ver || 1) + 1); p.updated = Date.now();
+    await db.put('pages', p); b.updated = Date.now(); await db.put('books', b);
+    return true;
+  },
+  // ---------- stickers on the book ----------
+  // The book view never changes your work. Double-click a sticker or text to open it in the editor, picked up.
   bindStickerDrag() {
     const c = this.book3d.canvas, B = this.book3d;
-    // the pages you can see, kept ready so a press can be checked instantly (before the page starts turning)
     const cache = this.stickerPages = new Map();
     const idOf = hit => hit.kind === 'page' ? this.book.pages[hit.idx] : hit.kind === 'cover' ? this.book.coverPage : this.book.surf?.[hit.kind];
     let lastFill = 0;
@@ -321,60 +368,29 @@ const app = {
       for (const id of ids) if (id) { const p = await db.get('pages', id); if (p) cache.set(id, p); }
     };
     this.fillStickerCache();
-    const pageFor = hit => cache.get(idOf(hit));
     const itemAt = (page, x, y) => {
       for (let i = page.layers.length - 1; i >= 0; i--) {
-        const L = page.layers[i]; if (!L.visible || L.locked || (L.kind !== 'image' && L.kind !== 'text')) continue;
+        const L = page.layers[i]; if (!L.visible || (L.kind !== 'image' && L.kind !== 'text')) continue;
         const sz = itemSize(L), sc = L.scale || 1, dx = x - L.x, dy = y - L.y, cs = Math.cos(-(L.rot || 0)), sn = Math.sin(-(L.rot || 0));
         if (Math.abs(dx * cs - dy * sn) <= sz.w * sc / 2 && Math.abs(dx * sn + dy * cs) <= sz.h * sc / 2) return L;
       }
       return null;
     };
-    let drag = null, busy = false, pending = false, last = null;
+    let last = null;
     c.addEventListener('pointerdown', async e => {
-      if (e.button !== 0 || B.free || B.anim || this.editor) return;
-      const hit = B.hitAt(e.clientX, e.clientY); if (!hit) return;
-      const page = pageFor(hit); if (!page) return;
-      const L = itemAt(page, hit.x * page.w, hit.y * page.h); if (!L) return;
-      e.stopImmediatePropagation(); e.preventDefault();
-      // double-click: open it in the editor, picked up
+      if (e.button !== 0 || B.free || B.anim || B.held || this.editor) return;
+      const hit = B.hitAt(e.clientX, e.clientY); if (!hit) { last = null; return; }
+      const page = cache.get(idOf(hit)); if (!page) return;
+      const L = itemAt(page, hit.x * page.w, hit.y * page.h); if (!L) { last = null; return; }
       const now = performance.now();
-      if (last && last.id === L.id && now - last.t < 450) {
-        last = null; const label = hit.kind === 'page' ? null : SURFACES[hit.kind].name;
-        if (hit.kind === 'page') await this.openEditor(hit.idx); else { this.lastSurface = hit.kind; await this.openEditor(-1, page.id, label); }
-        const ed = this.editor; if (ed) { ed.setTool('move'); ed.selectOnly(L.id); }
-        return;
-      }
-      last = { id: L.id, t: now };
-      try { c.setPointerCapture(e.pointerId); } catch (_) { }
-      drag = { hit, page, L, ox: hit.x * page.w - L.x, oy: hit.y * page.h - L.y, moved: false, res: await loadRes(page) };
-      c.style.cursor = 'grabbing';
+      if (!(last && last.id === L.id && now - last.t < 450 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 12)) { last = { id: L.id, t: now, x: e.clientX, y: e.clientY }; return; }
+      // second press on the same item: open it, and cancel the single click (no page turn)
+      last = null; e.stopImmediatePropagation(); e.preventDefault();
+      clearTimeout(B.clickTimer); B.lastClick = null;
+      if (hit.kind === 'page') await this.openEditor(hit.idx); else if (hit.kind === 'cover') await this.editCover(); else { this.lastSurface = hit.kind; await this.openEditor(-1, page.id, SURFACES[hit.kind].name); }
+      const ed = this.editor; if (ed?.page?.layers.some(x => x.id === L.id)) { ed.setTool('move'); ed.selectOnly(L.id); }
     }, true);
-    const preview = async () => {
-      if (busy) { pending = true; return; } busy = true;
-      try { await B.previewPart(drag.hit.kind, drag.page, drag.res, drag.hit.idx); } catch (err) { console.warn(err); }
-      busy = false; if (pending && drag) { pending = false; preview(); }
-    };
-    c.addEventListener('pointermove', e => {
-      if (!drag) { if (!e.buttons && performance.now() - lastFill > 900) this.fillStickerCache(); return; }
-      e.stopImmediatePropagation();
-      const h = B.hitAt(e.clientX, e.clientY);
-      if (!h || h.kind !== drag.hit.kind || (h.kind === 'page' && h.idx !== drag.hit.idx)) return; // stay on the same part
-      drag.L.x = h.x * drag.page.w - drag.ox; drag.L.y = h.y * drag.page.h - drag.oy; drag.moved = true;
-      preview();
-    }, true);
-    const up = async e => {
-      if (!drag) return;
-      e.stopImmediatePropagation();
-      const d = drag; drag = null; c.style.cursor = '';
-      if (!d.moved) return;
-      const P = await db.get('pages', d.page.id); const L = P.layers.find(l => l.id === d.L.id); if (!L) return;
-      L.x = d.L.x; L.y = d.L.y; P.ver = (P.ver || 1) + 1; P.updated = Date.now();
-      P.thumb = await putBlob(await makeThumb(P, this.book, 2048)); await db.put('pages', P);
-      await this.refreshPart(P);
-      this.fillStickerCache();
-    };
-    c.addEventListener('pointerup', up, true); c.addEventListener('pointercancel', up, true);
+    c.addEventListener('pointermove', e => { if (!e.buttons && performance.now() - lastFill > 900) this.fillStickerCache(); });
   },
 
   // ---------- every part of the book ----------
@@ -471,13 +487,11 @@ const app = {
     await this.editor.open(this.book, i, pageId, label);
   },
   async editCover() {
-    const b = this.book;
-    if (!b.coverPage) {
-      const p = newPageData(b, 0); p.layers[0].name = 'Cover art'; p.paper = { type: 'smooth', color: b.cover.color };
-      await db.put('pages', p); b.coverPage = p.id; await db.put('books', b);
-      toast('Draw anything here. It becomes your whole front cover.');
-    }
-    this.openEditor(-1, b.coverPage);
+    const fresh = !this.book.coverPage;
+    const p = await this.ensureCoverPage({ title: true });
+    if (fresh) toast('Draw anything here. It becomes your whole front cover.');
+    if (this.book3d && this.coverLifted) { await this.book3d.setBook(this.book); this.book3d.goTo(0); }
+    return this.openEditor(-1, p.id);
   },
   onEditorClosed(i) {
     this.editor = null;
@@ -553,13 +567,14 @@ const app = {
         el('h3', {}, 'Cover art'),
         el('div', { class: 'row wrap' },
           el('button', { class: 'btn small primary', onclick: () => this.editCover() }, '✎ Draw my own cover'),
-          el('button', { class: 'btn small', onclick: async () => { const pick = el('div', {}); const mm = modal('Cover art', pick, { wide: true }); pick.append(await assetGrid(['art', 'sticker', 'made'], a => { c.art = a.blob; mm.close(); apply(); })); } }, 'From library'),
-          el('button', { class: 'btn small', onclick: async () => { const f = await pickFiles('image/*', false); if (f[0]) { const [a] = await importFiles(f, 'art'); c.art = a.blob; apply(); } } }, 'From a file'),
+          el('button', { class: 'btn small', onclick: async () => { const pick = el('div', {}); const mm = modal('Cover art', pick, { wide: true }); pick.append(await assetGrid(['art', 'sticker', 'made'], async a => { c.art = a.blob; mm.close(); if (b.coverPage) await this.ensureCoverPage(); apply(); })); } }, 'From library'),
+          el('button', { class: 'btn small', onclick: async () => { const f = await pickFiles('image/*', false); if (f[0]) { const [a] = await importFiles(f, 'art'); c.art = a.blob; if (b.coverPage) await this.ensureCoverPage(); apply(); } } }, 'From a file'),
           (c.art || b.coverPage) ? el('button', { class: 'btn small danger', onclick: async () => { c.art = null; if (b.coverPage) { await db.del('pages', b.coverPage); b.coverPage = null; } apply(); } }, 'Remove art') : null),
         help('"Draw my own cover" opens the full editor on the cover, with every brush, layer, sticker and GIF.'),
         select('Art fit', c.artFit, { cover: 'Fill the window', contain: 'Show all of it', full: 'Whole cover' }, v => { c.artFit = v; apply(); }),
         slider('Art margin', c.artInset ?? 0.12, 0, 0.3, 0.01, v => { c.artInset = v; apply(); }),
         el('h3', {}, 'Title'),
+        help('When you open the cover in the editor, the title turns into text you can click, move and change there.'),
         el('label', { class: 'row col' }, el('span', { class: 'lbl' }, 'Title text (Enter for a new line)'), (() => { const t = el('textarea', { rows: 2, class: 'full' }); t.value = c.label || ''; t.addEventListener('input', () => { c.label = t.value; apply(); }); return t; })()),
         select('Title style', c.titleStyle || 'printed', { printed: 'Printed', 'foil-gold': 'Gold foil (shiny)', 'foil-silver': 'Silver foil (shiny)', emboss: 'Embossed (raised)', deboss: 'Debossed (pressed in)', label: 'Paper label' }, v => { c.titleStyle = v; apply(); }),
         select('Position', c.titlePos || (c.art ? 'bottom' : 'upper'), { top: 'Top', upper: 'Upper', center: 'Center', lower: 'Lower', bottom: 'Bottom' }, v => { c.titlePos = v; apply(); }),
@@ -578,6 +593,12 @@ const app = {
         colorInput('Paper tint', b.paper.color || (PAPERS[b.paper.type] || PAPERS.sketch).color, v => { b.paper.color = v; apply(true); }),
         el('div', { class: 'row wrap' }, el('button', { class: 'btn small primary', onclick: () => openPaperMaker(id => { if (id) { b.paper.type = id; b.paper.color = null; apply(true); m.close(); this.customize(); } }) }, '+ Make my own paper'),
           b.paper.type?.startsWith('u_') ? el('button', { class: 'btn small', onclick: () => openPaperMaker(id => { b.paper.type = id || 'sketch'; apply(true); }, b.paper.type) }, 'Edit this paper') : null),
+        el('h3', {}, 'Printed lines'),
+        select('Lines', lineValues(b.paper).kind, LINE_KINDS, v => { b.paper.lines = v; apply(true); }),
+        colorInput('Line color', lineValues(b.paper).color, v => { b.paper.lines = lineValues(b.paper).kind; b.paper.lineColor = v; apply(true); }),
+        slider('Line spacing', lineValues(b.paper).gap, 0.012, 0.08, 0.001, v => { b.paper.lines = lineValues(b.paper).kind; b.paper.lineGap = v; apply(true); }, v => Math.round(v * 1000) / 10 + '%'),
+        help('Lines go on every page that uses the book paper. A single page can have its own lines in the editor (Page panel).'),
+        el('h3', {}, 'Thickness'),
         slider('Paper thickness', b.paperWeight || 150, 60, 400, 10, v => { b.paperWeight = v; apply(); }, v => v + ' gsm'),
         help('Thicker paper makes a fatter book and stiffer pages.'),
         check('Page numbers', !!b.pageNumbers, v => { b.pageNumbers = v; apply('all'); }),
@@ -672,6 +693,8 @@ const app = {
       select('Look', s.theme, THEMES, v => { s.theme = v; document.documentElement.dataset.theme = v; setSetting('theme', v); }),
       select('Performance', s.quality, { max: 'Maximum quality', balanced: 'Balanced', performance: 'Performance (older PCs)' }, v => { s.quality = v; setSetting('quality', v); this.book3d?.setQuality(v); }),
       el('p', { class: 'muted small' }, 'This only changes the live preview. Exports always use the full quality you pick in Export.'),
+      check('Book sounds (page turns, opening and closing)', s.sounds, v => { s.sounds = v; setSetting('sounds', v); setSound({ enabled: v }); }),
+      slider('Sound volume', s.soundVol, 0, 1, 0.05, v => { s.soundVol = v; setSetting('soundVol', v); setSound({ volume: v }); }, v => Math.round(v * 100) + '%'),
       check('Reduce motion (instant page turns)', s.reducedMotion, v => { s.reducedMotion = v; setSetting('reducedMotion', v); if (this.book3d) this.book3d.reducedMotion = v; }),
       el('h3', {}, 'Saving'),
       el('p', {}, 'Everything saves in this browser on this PC. Nothing is uploaded. Clearing site data deletes it, so keep project files as backups.'),

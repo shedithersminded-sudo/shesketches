@@ -56,6 +56,11 @@ export const PAPER_PARAMS = [
   { k: 'lineColor', label: 'Line color', type: 'color', help: 'Color of the printed lines.' },
   { k: 'lineGap', label: 'Line spacing', min: 0.012, max: 0.08, step: 0.001, help: 'Space between lines, as a part of the page height.' },
 ];
+// printed lines anyone can put on a book or a single page, on top of any paper
+export const LINE_KINDS = { none: 'None', ruled: 'Ruled lines', wide: 'Wide ruled', margin: 'Ruled with margin', grid: 'Grid', dots: 'Dot grid', isometric: 'Isometric (3D drawing)', music: 'Music staff', cornell: 'Cornell notes', calligraphy: 'Handwriting guide', comic: 'Comic panels', storyboard: 'Storyboard', columns: 'Two columns', border: 'Frame border' };
+PAPER_PARAMS.find(q => q.k === 'lines').options = LINE_KINDS;
+// controls for the lines on any paper settings object (a book's paper or one page's)
+export function lineValues(P) { const d = PAPERS[P.type] || {}; return { kind: P.lines || d.lines || 'none', color: P.lineColor || d.lineColor || '#7c93b8', gap: P.lineGap || d.lineGap || 0.03 }; }
 export const PAPER_DEFAULT = { name: 'My paper', color: '#f3efe4', grain: 0.05, tooth: 0.55, scale: 3, lumps: 0, weave: false, fibers: 0.45, speckle: 0, crumple: 0, stains: false, lines: 'none', lineColor: '#7c93b8', lineGap: 0.03 };
 export function dropPaperCache(prefix) { for (const k of [...paperCache.keys()]) if (k.startsWith(prefix)) paperCache.delete(k); for (const k of [...grainCache.keys()]) if (k.startsWith(prefix)) grainCache.delete(k); }
 export function registerPapers(list) {
@@ -197,10 +202,12 @@ export function grainTile(type) {
 }
 
 // Full page background at any resolution. Big soft variation is added so tiles do not look repeated.
-export function paintPaper(ctx, w, h, type, color, customImg, seed = 1) {
+// lines: null = the paper's own lines, or { kind, color, gap } to pick your own ('none' for no lines)
+export function paintPaper(ctx, w, h, type, color, customImg, seed = 1, lines = null) {
   if (type === 'custom' && customImg) {
     const pat = ctx.createPattern(customImg, 'repeat');
     ctx.fillStyle = pat; ctx.fillRect(0, 0, w, h);
+    if (lines && lines.kind !== 'none') drawLines(ctx, w, h, lines);
     return;
   }
   const t = paperTile(type, color);
@@ -231,17 +238,39 @@ export function paintPaper(ctx, w, h, type, color, customImg, seed = 1) {
     e.addColorStop(0, 'rgba(150,105,50,0.16)'); e.addColorStop(0.06, 'rgba(150,105,50,0)'); e.addColorStop(0.94, 'rgba(150,105,50,0)'); e.addColorStop(1, 'rgba(150,105,50,0.18)');
     ctx.fillStyle = e; ctx.fillRect(0, 0, w, h);
   }
-  if (t.lines) drawLines(ctx, w, h, t.lines);
+  const L = lines || t.lines;
+  if (L && L.kind !== 'none') drawLines(ctx, w, h, L);
   ctx.restore();
 }
 
 // printed lines on a page (ruled, grid, dots...)
 function drawLines(ctx, w, h, L) {
-  const gap = Math.max(4, L.gap * h), lw = Math.max(1, h / 1600);
+  const gap = Math.max(4, (L.gap || 0.03) * h * (L.kind === 'wide' ? 1.3 : 1)), lw = Math.max(1, h / 1600);
   ctx.save(); ctx.strokeStyle = L.color; ctx.fillStyle = L.color; ctx.globalAlpha = 0.55; ctx.lineWidth = lw;
   const top = L.kind === 'grid' || L.kind === 'dots' ? (h % gap) / 2 : gap * 2.2;
   const hl = y => { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); };
-  if (L.kind === 'ruled' || L.kind === 'margin' || L.kind === 'cornell') {
+  const box = (x, y, bw, bh) => ctx.strokeRect(x, y, bw, bh);
+  if (L.kind === 'ruled' || L.kind === 'wide') {
+    for (let y = top; y < h - gap * 0.5; y += gap) hl(y);
+  } else if (L.kind === 'isometric') {
+    ctx.globalAlpha = 0.3; const dx = gap / Math.tan(Math.PI / 6);
+    for (let y = -w; y < h + w; y += gap) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y + w * Math.tan(Math.PI / 6)); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y - w * Math.tan(Math.PI / 6)); ctx.stroke(); }
+    for (let x = (w % (dx / 2)) / 2; x < w; x += dx / 2) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+  } else if (L.kind === 'calligraphy') { // writing guide: baseline, waist line and slant lines
+    for (let y = gap * 2.5; y + gap < h - gap; y += gap * 2.4) { ctx.globalAlpha = 0.55; hl(y + gap); ctx.globalAlpha = 0.3; hl(y + gap * 0.45); hl(y); }
+    ctx.globalAlpha = 0.15; const sl = Math.tan(55 * Math.PI / 180);
+    for (let x = -h / sl; x < w; x += gap * 1.6) { ctx.beginPath(); ctx.moveTo(x, h); ctx.lineTo(x + h / sl, 0); ctx.stroke(); }
+  } else if (L.kind === 'comic' || L.kind === 'storyboard') {
+    ctx.globalAlpha = 0.8; ctx.lineWidth = lw * 3; const m = w * 0.06, g2 = w * 0.025;
+    const rows = L.kind === 'comic' ? [[1, 1], [1], [2, 1]] : [[1, 1], [1, 1], [1, 1]];
+    const rh = (h - m * 2 - g2 * (rows.length - 1)) / rows.length;
+    rows.forEach((row, ri) => { const tot = row.reduce((a, b) => a + b, 0); let x = m; const y = m + ri * (rh + g2), ww = w - m * 2 - g2 * (row.length - 1);
+      for (const part of row) { const bw = ww * part / tot, bh = L.kind === 'storyboard' ? rh * 0.72 : rh; box(x, y, bw, bh); if (L.kind === 'storyboard') { ctx.save(); ctx.lineWidth = lw; ctx.globalAlpha = 0.4; for (let k = 1; k <= 2; k++) { const yy = y + bh + (rh - bh) * k / 3; ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + bw, yy); ctx.stroke(); } ctx.restore(); } x += bw + g2; } });
+  } else if (L.kind === 'columns') {
+    for (let y = top; y < h - gap * 0.5; y += gap) { ctx.beginPath(); ctx.moveTo(w * 0.06, y); ctx.lineTo(w * 0.48, y); ctx.moveTo(w * 0.52, y); ctx.lineTo(w * 0.94, y); ctx.stroke(); }
+  } else if (L.kind === 'border') {
+    ctx.globalAlpha = 0.7; ctx.lineWidth = lw * 2.5; box(w * 0.05, w * 0.05, w * 0.9, h - w * 0.1); ctx.lineWidth = lw; box(w * 0.065, w * 0.065, w * 0.87, h - w * 0.13);
+  } else if (L.kind === 'margin' || L.kind === 'cornell') {
     for (let y = top; y < h - gap * 0.5; y += gap) hl(y);
     if (L.kind !== 'ruled') { ctx.strokeStyle = '#d06060'; ctx.globalAlpha = 0.6; const x = L.kind === 'cornell' ? w * 0.3 : w * 0.12; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, L.kind === 'cornell' ? h * 0.8 : h); ctx.stroke(); if (L.kind === 'cornell') hl(h * 0.8); }
   } else if (L.kind === 'grid') {

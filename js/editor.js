@@ -6,7 +6,7 @@ import { colorWheel } from './colorwheel.js';
 import { drawLayer, drawLayers, drawPaper, bitmap, mediaRes, isAnimated, itemSize, makeThumb, canvasBlob, paperOf, motionSplit, motionSig } from './render.js';
 import { pushHistory } from './model.js';
 import { FX_PARAMS, FX_PRESETS, FX_DEFAULT } from './stickerfx.js';
-import { PAPERS } from './paper.js';
+import { PAPERS, LINE_KINDS, lineValues } from './paper.js';
 import { el, toast, slider, select, colorInput, check, pickFiles, confirmBox, promptBox, modal, saveFile } from './ui.js';
 import { importFiles, assetGrid, pieceTray, KINDS, SYSTEM_FONTS, loadAllFonts, MEDIA_ACCEPT } from './library.js';
 
@@ -1425,6 +1425,9 @@ export class Editor {
       select('Paper', P.paper ? P.paper.type : 'book', papers, async v => { P.paper = v === 'book' ? null : { type: v, color: null }; await this.repaper(); this.changed(); }),
       colorInput('Paper tint', (P.paper && P.paper.color) || (PAPERS[(P.paper || bp).type] || PAPERS.sketch).color, async v => { P.paper = { type: (P.paper || bp).type === 'custom' ? 'sketch' : (P.paper || bp).type, color: v }; await this.repaper(); this.changed(); }),
       el('button', { class: 'btn small', onclick: async () => { const fs = await pickFiles('image/*', false); if (!fs[0]) return; const id = await putBlob(fs[0]); P.paper = { type: 'custom', custom: id }; await this.repaper(); this.changed(); } }, 'Use my own paper texture'),
+      select('Printed lines', lineValues(P.paper || bp).kind, LINE_KINDS, async v => { P.paper = { ...(P.paper || bp), lines: v }; await this.repaper(); this.changed(); }),
+      colorInput('Line color', lineValues(P.paper || bp).color, v => { const cur = lineValues(P.paper || bp); P.paper = { ...(P.paper || bp), lines: cur.kind, lineColor: v }; this.repaperSoon(); }),
+      slider('Line spacing', lineValues(P.paper || bp).gap, 0.012, 0.08, 0.001, v => { const cur = lineValues(P.paper || bp); P.paper = { ...(P.paper || bp), lines: cur.kind, lineGap: v }; this.repaperSoon(); }, v => Math.round(v * 1000) / 10 + '%'),
       el('div', { class: 'muted small' }, `${P.w} × ${P.h} px at ${this.book.size.dpi} DPI (${this.book.size.wMM} × ${this.book.size.hMM} mm)`),
     ];
     if (P.history && P.history.length) {
@@ -1434,6 +1437,11 @@ export class Editor {
       out.push(box);
     }
     return out;
+  }
+  // redraw the paper after a short pause, without rebuilding the panel (so a slider keeps working while you drag it)
+  repaperSoon() {
+    clearTimeout(this._paperT);
+    this._paperT = setTimeout(async () => { if (!this.paperCanvas) return; this.contentVer = (this.contentVer || 0) + 1; await drawPaper(this.paperCanvas.getContext('2d'), this.page, this.book, this.page.w, this.page.h); this.dirty = true; this.changed(); }, 120);
   }
   async repaper() {
     this.contentVer = (this.contentVer || 0) + 1;

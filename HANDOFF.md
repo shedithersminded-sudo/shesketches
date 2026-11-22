@@ -51,6 +51,7 @@ No build step. Vanilla JS ES modules. `three` is mapped with an import map in `i
 | `js/library.js` | Imported art (original bytes kept), stickers, made pieces, fonts |
 | `js/dither.js` | SHEDITHERS link, runs `vendor/shd-engine.js` in a worker (copy `shedithers/js/engine.js` again for new effects) |
 | `js/exporter.js` | Export center, queue, checks, reports, history |
+| `js/sound.js` | Book sounds made in code: page swish and flap, cover lift and thump |
 | `js/encoders.js` | Zip, TIFF, BMP, PDF writers, DPI tags, file inspectors |
 | `js/selftest.js` | The tests.html self-test |
 | `js/ui.js` | Shared UI helpers |
@@ -95,7 +96,18 @@ No build step. Vanilla JS ES modules. `three` is mapped with an import map in `i
 - **Paper maker** on the shelf.
 - **Exports (all checked after making, with a report):** PNG, TIFF, JPG, WEBP, BMP, print PDF with bleed
   and crop marks, flip-through MP4/WebM up to 4K with page-turn sounds, GIFs, sticker sheets, project files,
-  live Record.
+  live Record, and a 3D picture of the current camera view (up to 8K). Video camera has a full 360 spin.
+- **Book view never edits your work.** Dragging on the book only turns pages or moves the camera.
+  Double-click a sticker or text to open it in the editor, picked up. Stickers are only placed by dropping
+  them from the tray on purpose.
+- **Cover title is editable.** Opening the cover in the editor turns the printed title (and any cover
+  picture) into normal text and image layers (`liftCover` in main.js). Foil and emboss looks become plain text then.
+- **Printed lines:** 13 kinds (ruled, wide, margin, grid, dots, isometric, music, Cornell, handwriting guide,
+  comic panels, storyboard, two columns, frame border) with color and spacing, for the whole book
+  (Customize > Paper) or one page (editor Page panel). Stored as `paper.lines/lineColor/lineGap`.
+- **Sounds:** page turns, cover open and close. Settings has on/off and volume.
+- **Camera:** 16 preset angles, Spin (V), and 3 saved views per book (Shift + 1 to 3), stored in `book.views`.
+- **Look:** Noir theme (black, white, gray, glowing type) is the default. Older themes still in Settings.
 - **Speed:** paint reads the page once per stroke in tiles. Undo stores only "before" pixels with a memory cap.
   Book frame about 1.7 ms. A 200-page book opens in under 1 s.
 

@@ -155,6 +155,7 @@ async function run() {
     // custom paper with printed lines
     registerPapers([{ id: 'u_test', name: 'Test', color: '#f0e8d8', lines: 'grid', lineColor: '#ff0000', lineGap: 0.05, crumple: 0.5 }]);
     { const cv = document.createElement('canvas'); cv.width = 300; cv.height = 400; paintPaper(cv.getContext('2d'), 300, 400, 'u_test', null, null, 1); const d2 = cv.getContext('2d').getImageData(0, 0, 300, 400).data; let red = 0; for (let i = 0; i < d2.length; i += 4) if (d2[i] > d2[i + 1] + 30) red++; t(red > 500, 'Paper maker papers draw with printed lines', red + ' line pixels'); }
+    { let n = 0; for (const kind of ['ruled', 'grid', 'dots', 'isometric', 'calligraphy', 'comic', 'storyboard', 'columns', 'border', 'music', 'cornell']) { const cv = document.createElement('canvas'); cv.width = 300; cv.height = 400; paintPaper(cv.getContext('2d'), 300, 400, 'white', null, null, 1, { kind, color: '#000000', gap: 0.03 }); const d2 = cv.getContext('2d').getImageData(0, 0, 300, 400).data; let dark = 0; for (let i = 0; i < d2.length; i += 4) if (d2[i] < 200) dark++; if (dark > 150) n++; } t(n === 11, 'All 11 printed line styles draw on any paper', n + ' of 11'); }
     registerPapers([]);
     page.layers[0].blob = await putBlob(await canvasBlob(c));
     page.thumb = await putBlob(await makeThumb(page, book, 800));
@@ -197,7 +198,8 @@ async function run() {
       ['GIF from layers', J.gifLayersJob(book, 2, { mode: 'build', w: 300, fps: 6, colors: 64, loop: true, repeat: 1 })],
       ['Flip GIF', J.gifFlipJob(app, book, { w: 320, h: 200, fps: 8, colors: 64, loop: true, hold: 0.3, flip: 0.5, introHold: 0.2, outroHold: 0.2, camera: 'angled', detail: 512, from: 0, to: 3 })],
       ['Flip video MP4', J.videoJob(app, book, { format: 'mp4', w: 640, h: 360, fps: 24, bitrate: 4, hold: 0.3, flip: 0.5, introHold: 0.2, outroHold: 0.2, camera: 'drift', detail: 512, sound: true, volume: 0.5, from: 0, to: 3 })],
-      ['Flip video WebM', J.videoJob(app, book, { format: 'webm', w: 640, h: 360, fps: 24, bitrate: 4, hold: 0.3, flip: 0.5, introHold: 0.2, outroHold: 0.2, camera: 'orbit', detail: 512, sound: false, from: 1, to: 3 })],
+      ['Flip video WebM', J.videoJob(app, book, { format: 'webm', w: 640, h: 360, fps: 24, bitrate: 4, hold: 0.3, flip: 0.5, introHold: 0.2, outroHold: 0.2, camera: 'spin', detail: 512, sound: false, from: 1, to: 3 })],
+      ['3D picture', J.stillJob(app, book, { format: 'png', w: 800, h: 450, detail: 512 })],
       ['Project file', J.projectJob(book)],
     ];
     for (const [label, job] of jobs) {
